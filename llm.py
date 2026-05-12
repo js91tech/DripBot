@@ -1,11 +1,16 @@
 import aiohttp
-import base64
 import os
+from urllib.parse import quote
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 
-async def generate_llm_response(system_prompt, chat_history, model_name=None):
+async def generate_llm_response(
+    system_prompt,
+    chat_history,
+    model_name=None,
+    max_tokens=150,
+):
     """Sends the context to OpenRouter and gets a coherent response."""
     if not OPENROUTER_API_KEY:
         print("ERROR: OPENROUTER_API_KEY is missing from environment variables!")
@@ -37,20 +42,29 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
     data = {
         "model": model_name,
         "messages": messages,
-        "max_tokens": 150,  # Keep it short like a Discord message
-        "temperature": 0.9  # A little creative
+        "max_tokens": max_tokens,
+        "temperature": 0.3 if max_tokens > 300 else 0.9,
     }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=data) as resp:
+            async with session.post(
+                url, headers=headers, json=data
+            ) as resp:
                 if resp.status == 200:
                     result = await resp.json()
-                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    content = (
+                        result.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
                     return content.strip() if content else None
                 else:
                     error_text = await resp.text()
-                    print(f"OpenRouter Error: {resp.status} - {error_text}")
+                    print(
+                        f"OpenRouter Error: "
+                        f"{resp.status} - {error_text}"
+                    )
                     return None
     except Exception as e:
         print(f"LLM API Error: {e}")
@@ -58,64 +72,31 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
 
 
 async def generate_image(prompt, model_name=None):
-    """Generate an image via OpenRouter image generation endpoint.
+    """Generate an image via Pollinations.ai (free, no API key).
 
-    Returns bytes (PNG/JPEG) or None on failure.
+    Returns bytes (PNG) or None on failure.
     """
-    if not OPENROUTER_API_KEY:
-        print("ERROR: OPENROUTER_API_KEY is missing!")
-        return None
-
-    if not model_name:
-        model_name = "stability-ai/stable-diffusion-xl-1024-v1-0"
-
-    url = "https://openrouter.ai/api/v1/image/generations"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://discord-bot.local",
-    }
-
-    data = {
-        "model": model_name,
-        "prompt": prompt,
-        "n": 1,
-    }
+    encoded = quote(prompt)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=1024&height=1024&nologo=true"
+    )
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, headers=headers, json=data,
-                timeout=aiohttp.ClientTimeout(total=60)
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=60),
             ) as resp:
                 if resp.status == 200:
-                    result = await resp.json()
-                    images = result.get("data", [])
-                    if images:
-                        img_url = images[0].get("url")
-                        if img_url:
-                            # Download the image bytes
-                            async with session.get(
-                                img_url,
-                                timeout=aiohttp.ClientTimeout(
-                                    total=30
-                                )
-                            ) as img_resp:
-                                if img_resp.status == 200:
-                                    return await img_resp.read()
-                                else:
-                                    print(f"Image download failed: {img_resp.status}")
-                                    return None
-                        # Some models return base64 directly
-                        b64 = images[0].get("b64_json")
-                        if b64:
-                            return base64.b64decode(b64)
-                    print("Image generation returned no data")
-                    return None
+                    return await resp.read()
                 else:
                     error_text = await resp.text()
-                    print(f"Image Gen Error: {resp.status} - {error_text}")
+                    print(
+                        f"Pollinations Error: "
+                        f"{resp.status} - {error_text[:200]}"
+                    )
                     return None
     except Exception as e:
-        print(f"Image Gen API Error: {e}")
+        print(f"Image Gen Error: {e}")
         return None

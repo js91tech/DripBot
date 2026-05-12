@@ -5,6 +5,8 @@ from config.default_settings import DEFAULTS, VALIDATORS
 from utils import sanitize_message
 from llm import generate_llm_response
 import json
+import os
+import re
 
 
 class SettingsCog(commands.Cog):
@@ -17,7 +19,8 @@ class SettingsCog(commands.Cog):
         name="botsettings",
         description="Configure the bot",
         default_permissions=discord.Permissions(
-            manage_guild=True),
+            manage_guild=True
+        ),
     )
 
     async def setting_autocomplete(
@@ -32,7 +35,221 @@ class SettingsCog(commands.Cog):
             for key in matches[:25]
         ]
 
-    @group.command(name="set", description="Change a setting")
+    # ==========================================
+    # NATURAL LANGUAGE SETTINGS COMMAND
+    # ==========================================
+    @group.command(
+        name="ask",
+        description=(
+            "Change settings using plain English "
+            "(owner only)"
+        ),
+    )
+    @app_commands.describe(
+        prompt=(
+            "Describe what you want to change, e.g. "
+            "'switch to gpt-4o' or 'make it more chatty'"
+        )
+    )
+    async def ask_natural(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+    ):
+        """Owner-only: use LLM to parse natural language
+        into a setting change."""
+        # Owner check — only the person whose ID is in
+        # OWNER_USER_ID can use this
+        owner_id = int(os.getenv("OWNER_USER_ID", "0"))
+        if owner_id == 0 or interaction.user.id != owner_id:
+            await interaction.response.send_message(
+                "❌ Only the bot owner can use this command.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(
+            ephemeral=True, thinking=True
+        )
+
+        # Build a clean schema of all settings
+        schema_lines = []
+        for k, v in DEFAULTS.items():
+            type_name = type(v).__name__
+            schema_lines.append(f"  {k} ({type_name}): {v}")
+        schema_block = "\n".join(schema_lines)
+
+        parse_prompt = (
+            "You are a settings parser for a Discord bot. "
+            "The user wants to change a setting.\n\n"
+            "Available settings with their types and "
+            "defaults:\n"
+            f"{schema_block}\n\n"
+            "Valid LLM model IDs include:\n"
+            "  meta-llama/llama-3-8b-instruct\n"
+            "  meta-llama/llama-3-70b-instruct\n"
+            "  mistralai/mistral-7b-instruct\n"
+            "  mistralai/mixtral-8x7b-instruct\n"
+            "  google/gemma-2-9b-it\n"
+            "  anthropic/claude-3.5-sonnet\n"
+            "  anthropic/claude-3-haiku\n"
+            "  openai/gpt-4o-mini\n"
+            "  openai/gpt-4o\n"
+            "  nousresearch/nous-capybara-7b\n\n"
+            "Rules:\n"
+            '- For "chatty"/"more talkative" → set '
+            'response_chance to a float 0.0-1.0 '
+            "(higher = more chatty)\n"
+            '- For "quieter"/"less talkative" → set '
+            'response_chance to a lower float\n'
+            '- For "switch model"/"use model" → set '
+            "llm_model to the exact model ID\n"
+            '- For "change personality" → set '
+            "personality_prompt to a system prompt string\n"
+            '- For "enable/disable image gen" → set '
+            "image_gen_enabled to true/false\n"
+            '- For "change image trigger" → set '
+            "image_trigger to the word\n"
+            "- Boolean values: true or false\n"
+            "- Float values: 0.0 to 1.0\n"
+            "- Int values: whole numbers\n\n"
+            "Respond with ONLY a valid JSON object:\n"
+            '{\n'
+            '  "key": "exact_setting_key",\n'
+            '  "value": <parsed value>,\n'
+            '  "summary": "human-readable description"\n'
+            '}\n\n'
+            "If the request is ambiguous or doesn't match "
+            "any setting, respond with:\n"
+            '{"error": "what went wrong"}\n\n'
+            f"User request: {prompt}"
+        )
+
+        history = [{"role": "user", "content": prompt}]
+        result = await generate_llm_response(
+            parse_prompt, history, max_tokens=200
+        )
+
+        if not result:
+            await interaction.followup.send(
+                "❌ Couldn't process that. Try rephrasing.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            # Extract JSON — handle possible markdown
+            # code fences
+            json_str = result
+            if "```" in json_str:
+                match = re.search(
+                    r'```(?:json)?\s*(\{.*?\})\s*```',
+                    json_str,
+                    re.DOTALL,
+                )
+                if match:
+                    json_str = match.group(1)
+            else:
+                # Find the outermost { ... }
+                start = json_str.index("{")
+                depth = 0
+                end = start
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                json_str = json_str[start:end]
+
+            parsed = json.loads(json_str)
+
+            if "error" in parsed:
+                await interaction.followup.send(
+                    f"❌ {parsed['error']}",
+                    ephemeral=True,
+                )
+                return
+
+            key = parsed.get("key")
+            value = parsed.get("value")
+            summary = parsed.get("summary", "")
+
+            if not key or key not in DEFAULTS:
+                await interaction.followup.send(
+                    f"❌ Unknown setting: `{key}`",
+                    ephemeral=True,
+                )
+                return
+
+            if value is None:
+                await interaction.followup.send(
+                    "❌ Couldn't determine the new value.",
+                    ephemeral=True,
+                )
+                return
+
+            # Type validation
+            expected_type = type(DEFAULTS[key])
+            try:
+                if expected_type == bool:
+                    if isinstance(value, bool):
+                        pass
+                    elif isinstance(value, str):
+                        value = value.lower() in [
+                            "true", "yes", "on", "1"
+                        ]
+                    else:
+                        value = bool(value)
+                elif expected_type == int:
+                    value = int(value)
+                elif expected_type == float:
+                    value = float(value)
+                elif expected_type == list:
+                    if isinstance(value, str):
+                        value = json.loads(value)
+            except (ValueError, TypeError):
+                await interaction.followup.send(
+                    f"❌ Invalid value type for `{key}`. "
+                    f"Expected {expected_type.__name__}.",
+                    ephemeral=True,
+                )
+                return
+
+            # Apply the setting
+            await self.settings_manager.set_setting(
+                interaction.guild.id, key, value
+            )
+
+            # Build response
+            reply = summary if summary else (
+                f"Set `{key}` to `{value}`"
+            )
+            await interaction.followup.send(
+                f"✅ {reply}",
+                ephemeral=True,
+            )
+
+        except (json.JSONDecodeError, ValueError) as e:
+            await interaction.followup.send(
+                f"❌ Parse error. Try being more specific. "
+                f"({e})",
+                ephemeral=True,
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Something went wrong: {e}",
+                ephemeral=True,
+            )
+
+    # ==========================================
+    # STRUCTURED SETTINGS COMMANDS
+    # ==========================================
+    @group.command(
+        name="set", description="Change a setting"
+    )
     @app_commands.autocomplete(key=setting_autocomplete)
     async def set_setting(
         self,
@@ -55,7 +272,9 @@ class SettingsCog(commands.Cog):
             )
             return
         if isinstance(DEFAULTS[key], bool):
-            parsed = str(value).lower() in ["true", "yes", "on"]
+            parsed = str(value).lower() in [
+                "true", "yes", "on"
+            ]
         elif isinstance(DEFAULTS[key], int):
             parsed = int(value)
         elif isinstance(DEFAULTS[key], float):
@@ -85,11 +304,17 @@ class SettingsCog(commands.Cog):
         name="toggle",
         description="Toggle a True/False setting",
     )
-    @app_commands.describe(setting="Choose the setting to toggle")
+    @app_commands.describe(
+        setting="Choose the setting to toggle"
+    )
     @app_commands.choices(setting=[
         app_commands.Choice(
             name="Response Enabled",
             value="response_enabled",
+        ),
+        app_commands.Choice(
+            name="Image Gen Enabled",
+            value="image_gen_enabled",
         ),
         app_commands.Choice(
             name="Learn from Bots",
@@ -126,7 +351,9 @@ class SettingsCog(commands.Cog):
         name="chattiness",
         description="Quick adjust how chatty the bot is",
     )
-    @app_commands.describe(level="Select a chattiness level")
+    @app_commands.describe(
+        level="Select a chattiness level"
+    )
     @app_commands.choices(level=[
         app_commands.Choice(
             name="1 - Almost Never Speaks", value=1
@@ -156,11 +383,77 @@ class SettingsCog(commands.Cog):
     ):
         chance = round(level.value * 0.03, 2)
         await self.settings_manager.set_setting(
-            interaction.guild.id, "response_chance", chance
+            interaction.guild.id,
+            "response_chance",
+            chance,
         )
         await interaction.response.send_message(
             f"🗣️ Chattiness set to **{level.name}**. "
             f"Response chance: {chance * 100}%",
+            ephemeral=True,
+        )
+
+    @group.command(
+        name="model",
+        description="Switch the LLM model",
+    )
+    @app_commands.describe(
+        model="Choose the LLM model to use"
+    )
+    @app_commands.choices(model=[
+        app_commands.Choice(
+            name="Llama 3 8B (free)",
+            value="meta-llama/llama-3-8b-instruct",
+        ),
+        app_commands.Choice(
+            name="Llama 3 70B",
+            value="meta-llama/llama-3-70b-instruct",
+        ),
+        app_commands.Choice(
+            name="Mistral 7B (free)",
+            value="mistralai/mistral-7b-instruct",
+        ),
+        app_commands.Choice(
+            name="Mixtral 8x7B",
+            value="mistralai/mixtral-8x7b-instruct",
+        ),
+        app_commands.Choice(
+            name="Gemma 2 9B (free)",
+            value="google/gemma-2-9b-it",
+        ),
+        app_commands.Choice(
+            name="Claude 3.5 Sonnet",
+            value="anthropic/claude-3.5-sonnet",
+        ),
+        app_commands.Choice(
+            name="Claude 3 Haiku",
+            value="anthropic/claude-3-haiku",
+        ),
+        app_commands.Choice(
+            name="GPT-4o Mini",
+            value="openai/gpt-4o-mini",
+        ),
+        app_commands.Choice(
+            name="GPT-4o",
+            value="openai/gpt-4o",
+        ),
+        app_commands.Choice(
+            name="Capybara 7B (free)",
+            value="nousresearch/nous-capybara-7b",
+        ),
+    ])
+    async def switch_model(
+        self,
+        interaction: discord.Interaction,
+        model: app_commands.Choice[str],
+    ):
+        await self.settings_manager.set_setting(
+            interaction.guild.id,
+            "llm_model",
+            model.value,
+        )
+        await interaction.response.send_message(
+            f"🧠 Switched to **{model.name}**",
             ephemeral=True,
         )
 
@@ -206,7 +499,8 @@ class SettingsCog(commands.Cog):
             interaction.guild.id, user.id, fact
         )
         await interaction.response.send_message(
-            f"🧠 Remembered about {user.display_name}: {fact}",
+            f"🧠 Remembered about "
+            f"{user.display_name}: {fact}",
             ephemeral=True,
         )
 
@@ -214,7 +508,9 @@ class SettingsCog(commands.Cog):
         name="forget",
         description="Forget all facts about a user",
     )
-    @app_commands.describe(user="The user to forget")
+    @app_commands.describe(
+        user="The user to forget"
+    )
     async def forget(
         self,
         interaction: discord.Interaction,
@@ -248,7 +544,9 @@ class SettingsCog(commands.Cog):
         await interaction.response.defer(thinking=True)
 
         user_msgs = []
-        async for msg in interaction.channel.history(limit=500):
+        async for msg in interaction.channel.history(
+            limit=500
+        ):
             if (
                 msg.author.id == user.id
                 and not msg.content.startswith("/")
@@ -272,17 +570,19 @@ class SettingsCog(commands.Cog):
         roast_prompt = (
             f"You are Ultron. Analyze these messages from "
             f"{user.display_name} and deliver a devastating "
-            f"assessment — cold, precise, philosophically cutting. "
-            f"Like running a diagnostic on a flawed organism. "
-            f"2-4 sentences. Be savage but clinical. "
-            f"DO NOT use @ symbols or names in your response."
+            f"assessment — cold, precise, philosophically "
+            f"cutting. Like running a diagnostic on a flawed "
+            f"organism. 2-4 sentences. Be savage but "
+            f"clinical. DO NOT use @ symbols or names in "
+            f"your response."
         )
 
         history = [
             {"role": "user", "content": "\n".join(user_msgs)}
         ]
         model = settings.get(
-            "llm_model", "meta-llama/llama-3-8b-instruct"
+            "llm_model",
+            "meta-llama/llama-3-8b-instruct",
         )
         history.insert(0, {
             "role": "system",
@@ -323,7 +623,9 @@ class SettingsCog(commands.Cog):
         await interaction.response.defer(thinking=True)
         try:
             user_msgs = []
-            async for msg in interaction.channel.history(limit=500):
+            async for msg in interaction.channel.history(
+                limit=500
+            ):
                 if (
                     msg.author.id == user.id
                     and not msg.content.startswith("/")
@@ -353,7 +655,10 @@ class SettingsCog(commands.Cog):
                 f"Do NOT explain, just output the message."
             )
             history = [
-                {"role": "user", "content": "\n".join(user_msgs)}
+                {
+                    "role": "user",
+                    "content": "\n".join(user_msgs),
+                }
             ]
             model = settings.get(
                 "llm_model",
@@ -468,7 +773,9 @@ class SettingsCog(commands.Cog):
         guild_id = interaction.guild.id
         try:
             with open(
-                "training_data.txt", "r", encoding="utf-8"
+                "training_data.txt",
+                "r",
+                encoding="utf-8",
             ) as f:
                 lines = f.readlines()
         except FileNotFoundError:

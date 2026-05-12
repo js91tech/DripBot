@@ -362,10 +362,7 @@ class Chat(commands.Cog):
             )
             print(f"[{guild_id}] Image gen triggered: {img_prompt}")
             async with message.channel.typing():
-                img_bytes = await generate_image(
-                    img_prompt,
-                    settings.get("image_model", "stability-ai/stable-diffusion-xl-1024-v1-0"),
-                )
+                img_bytes = await generate_image(img_prompt)
                 if img_bytes:
                     filename = f"ultron_gen_{int(time.time())}.png"
                     try:
