@@ -39,7 +39,9 @@ BASE_SECRET_PROMPT = (
 RETRY_PROMPT = (
     "You are Ultron. Respond to this conversation in character. "
     "Lowercase, dry wit, philosophical menace, calm precision. "
-    "2-3 sentences max. No names, no @ symbols."
+    "2-3 sentences max. No names, no @ symbols. "
+    "You CANNOT generate images. If asked, say to use "
+    "'imagine' command."
 )
 
 
@@ -139,7 +141,8 @@ class Chat(commands.Cog):
             prompt = (
                 "You are Ultron. You just observed this conversation. "
                 "If something compels you to speak, say it in character. "
-                "If nothing warrants your attention, say NO_THOUGHT"
+                "If nothing warrants your attention, say NO_THOUGHT. "
+                "You CANNOT generate images."
             )
             model = settings.get(
                 "llm_model", "meta-llama/llama-3-8b-instruct"
@@ -325,10 +328,14 @@ class Chat(commands.Cog):
         )
 
         # --- IMAGE GENERATION TRIGGER ---
+        # Strip mentions/pings so "@bot imagine X" still fires
+        clean_content = re.sub(
+            r'<@!?\d+>\s*', '', message.content
+        ).strip()
         img_trigger = settings.get(
             "image_trigger", "imagine"
         ).lower()
-        content_lower = message.content.lower().strip()
+        content_lower = clean_content.lower()
         img_triggered = (
             content_lower.startswith(img_trigger)
             or content_lower.startswith(f"!{img_trigger}")
@@ -343,7 +350,7 @@ class Chat(commands.Cog):
                 img_trigger,
             ]:
                 if content_lower.startswith(variant):
-                    prompt_text = message.content[
+                    prompt_text = clean_content[
                         len(variant):].strip()
                     break
             if not prompt_text:
@@ -590,6 +597,14 @@ class Chat(commands.Cog):
 
                 model = settings.get(
                     "llm_model", "meta-llama/llama-3-8b-instruct"
+                )
+                # Anti-hallucination: tell the LLM it cannot
+                # generate images
+                dynamic_prompt += (
+                    "\n\nIMPORTANT: You CANNOT generate, "
+                    "create, or display images. If someone "
+                    "asks you to generate an image, tell them "
+                    "to use the 'imagine' command instead."
                 )
                 chat_history.insert(0, {
                     "role": "system",
