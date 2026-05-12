@@ -1,0 +1,6 @@
+discord.py==2.3.2
+aiohttp==3.9.1
+aiosqlite==0.20.0
+fastapi
+uvicorn
+pydantic
