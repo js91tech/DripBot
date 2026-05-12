@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #36393f;
+            --bg-secondary: #2f3136;
+            --bg-tertiary: #202225;
+            --accent: #5865f2;
+            --accent-hover: #4752c4;
+            --text-primary: #dcddde;
+            --text-secondary: #72767d;
+            --text-header: #ffffff;
+            --success: #3ba55c;
+            --danger: #ed4245;
+            --warning: #faa61a;
+            --input-bg: #40444b;
+            --border: #42454a;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-bottom: 70px;
+        }
+        /* === HEADER === */
+        .header {
+            background: var(--bg-secondary);
+            padding: 18px 30px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .header h1 { font-size: 20px; color: var(--text-header); }
+        .guild-select {
+            background: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 220px;
+            cursor: pointer;
+        }
+        .guild-select:focus { outline: none; border-color: var(--accent); }
+        /* === TABS === */
+        .tabs {
+            display: flex;
+            background: var(--bg-secondary);
+            padding: 0 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        .tab {
+            padding: 12px 22px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            font-size: 14px;
+            user-select: none;
+        }
+        .tab:hover { color: var(--text-primary); }
+        .tab.active { color: var(--text-header); border-bottom-color: var(--accent); }
+        /* === CONTENT === */
+        .content { padding: 24px 30px; max-width: 960px; margin: 0 auto; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        /* === CARDS === */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+        .card h3 {
+            color: var(--text-header);
+            margin-bottom: 16px;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 600;
+        }
+        /* === STATS GRID === */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .stat-card {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 22px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 34px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+        }
+        /* === SETTING ROWS === */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            gap: 16px;
+        }
+        .setting-row:last-child { border-bottom: none; }
+        .setting-info { flex: 1; min-width: 0; }
+        .setting-name { color: var(--text-header); font-size: 14px; }
+        .setting-desc {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 3px;
+        }
+        .setting-control { flex-shrink: 0; }
+        /* === TOGGLE === */
+        .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
+        .toggle input { display: none; }
+        .toggle .slider {
+            position: absolute; inset: 0;
+            background: var(--input-bg);
+            border-radius: 12px;
+            transition: 0.3s;
+        }
+        .toggle .slider::before {
+            content: '';
+            position: absolute;
+            width: 18px; height: 18px;
+            left: 3px; top: 3px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        .toggle input:checked + .slider { background: var(--accent); }
+        .toggle input:checked + .slider::before {
+            transform: translateX(20px);
+            background: white;
+        }
+        /* === RANGE === */
+        .range-wrap { display: flex; align-items: center; gap: 10px; }
+        .range-wrap input[type="range"] {
+            width: 110px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .range-val {
+            font-size: 13px;
+            min-width: 42px;
+            text-align: right;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        /* === TEXT / NUMBER INPUT === */
+        .ctrl-input {
+            background: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 200px;
+        }
+        .ctrl-input:focus { outline: none; border-color: var(--accent); }
+        .ctrl-input.narrow { width: 90px; }
+        /* === SELECT === */
+        .ctrl-select {
+            background: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .ctrl-select:focus { outline: none; border-color: var(--accent); }
+        /* === CHANNEL CHECKLIST === */
+        .channel-list {
+            display: flex; flex-wrap: wrap; gap: 6px;
+            margin-top: 8px; max-height: 150px;
+            overflow-y: auto;
+        }
+        .channel-tag {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: 0.2s;
+            user-select: none;
+        }
+        .channel-tag:hover { border-color: var(--accent); }
+        .channel-tag.selected {
+            background: rgba(88,101,242,0.15);
+            border-color: var(--accent);
+            color: white;
+        }
+        .channel-tag input { display: none; }
+        .channel-tag .check {
+            width: 14px; height: 14px;
+            border: 1px solid var(--text-secondary);
+            border-radius: 3px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; transition: 0.2s;
+        }
+        .channel-tag.selected .check {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        /* === MEMORY TABLE === */
+        .mem-table { width: 100%; border-collapse: collapse; }
+        .mem-table th {
+            text-align: left; padding: 10px 8px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .mem-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-size: 14px;
+            vertical-align: top;
+        }
+        .mem-note { max-width: 500px; word-break: break-word; }
+        /* === FORM ROW === */
+        .form-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .form-row .ctrl-input { flex: 1; min-width: 120px; }
+        /* === BUTTONS === */
+        .btn {
+            padding: 8px 18px;
+            border: none; border-radius: 6px;
+            cursor: pointer; font-size: 14px;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { opacity: 0.85; }
+        .btn-ghost {
+            background: transparent; color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        /* === SAVE BAR === */
+        .save-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            padding: 14px 30px;
+            display: flex; justify-content: flex-end; gap: 10px;
+            z-index: 100;
+        }
+        .unsaved-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            background: var(--warning);
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        /* === TOAST === */
+        .toast {
+            position: fixed; top: 20px; right: 20px;
+            padding: 12px 20px; border-radius: 8px;
+            color: white; font-size: 14px; z-index: 200;
+            transform: translateX(calc(100% + 40px));
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .toast.show { transform: translateX(0); }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--danger); }
+        /* === CONSOLIDATED MEMORY === */
+        .consolidated-text {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: var(--text-primary);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .no-data {
+            color: var(--text-secondary);
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <h1>🧠 Bot Dashboard</h1>
+    <select id="guild-select" class="guild-select">
+        <option value="">Select a server...</option>
+    </select>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+    <div class="tab active" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</div>
+    <div class="tab" data-tab="stats" onclick="switchTab('stats')">📊 Stats</div>
+    <div class="tab" data-tab="memories" onclick="switchTab('memories')">🧠 Memories</div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="tab-content active">
+        <div id="settings-container"></div>
+    </div>
+
+    <!-- STATS TAB -->
+    <div id="tab-stats" class="tab-content">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-sent">-</div>
+                <div class="stat-label">Messages Sent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-processed">-</div>
+                <div class="stat-label">Messages Processed</div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Quick Chattiness</h3>
+            <div class="setting-row">
+                <div class="setting-info">
+                    <div class="setting-name">Chattiness Level</div>
+                    <div class="setting-desc">Drag to adjust how chatty the bot is</div>
+                </div>
+                <div class="setting-control range-wrap">
+                    <input type="range" id="chattiness-slider" min="1" max="10" step="1" value="5" oninput="onChattinessChange(this.value)">
+                    <span class="range-val" id="chattiness-label">5 - Average</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MEMORIES TAB -->
+    <div id="tab-memories" class="tab-content">
+        <div class="card">
+            <h3>Add Memory</h3>
+            <div class="form-row">
+                <input type="number" id="mem-user-id" class="ctrl-input narrow" placeholder="User ID">
+                <input type="text" id="mem-note" class="ctrl-input" placeholder="Fact or memory about this user...">
+                <button class="btn btn-primary" onclick="addMemory()">+ Add</button>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Server Culture Memory</h3>
+            <div id="consolidated-display"><div class="no-data">No consolidated memory yet</div></div>
+        </div>
+        <div class="card">
+            <h3>User Memories</h3>
+            <table class="mem-table">
+                <thead>
+                    <tr><th>User ID</th><th>Memory</th><th></th></tr>
+                </thead>
+                <tbody id="mem-tbody"></tbody>
+            </table>
+            <div id="mem-empty" class="no-data">No memories stored</div>
+        </div>
+    </div>
+
+    <div id="empty-msg" class="empty-state" style="display:none;">
+        <div class="icon">🤖</div>
+        <p>Select a server above to get started</p>
+    </div>
+</div>
+
+<!-- SAVE BAR -->
+<div class="save-bar" id="save-bar">
+    <span id="unsaved-indicator"></span>
+    <button class="btn btn-ghost" onclick="reloadSettings()">↩ Reset</button>
+    <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast"></div>
+
+<script>
+// ==========================================
+// STATE
+// ==========================================
+let currentGuild = null;
+let currentSettings = {};
+let channelList = [];
+let hasUnsaved = false;
+
+// ==========================================
+// SETTINGS CONFIG
+// ==========================================
+const SETTINGS = [
+    {
+        category: "Response Control",
+        keys: [
+            { key: "response_enabled", label: "Response Enabled", desc: "Bot will respond to messages", type: "toggle" },
+            { key: "trigger_on_mention", label: "Trigger on Mention", desc: "Respond when @mentioned", type: "toggle" },
+            { key: "trigger_on_reply", label: "Trigger on Reply", desc: "Respond when directly replied to", type: "toggle" },
+            { key: "cooldown_seconds", label: "Cooldown", desc: "Min seconds between bot responses", type: "number", min: 0, max: 300 },
+            { key: "conversation_window_seconds", label: "Engagement Window", desc: "Seconds a conversation stays active", type: "number", min: 30, max: 600 },
+        ]
+    },
+    {
+        category: "Brain & Model",
+        keys: [
+            { key: "brain_mode", label: "Brain Mode", desc: "Response engine", type: "select", options: ["markov", "llm"] },
+            { key: "llm_model", label: "LLM Model", desc: "OpenRouter model ID", type: "text" },
+            { key: "personality_prefix", label: "Personality Prefix", desc: "Text prepended to responses", type: "text" },
+        ]
+    },
+    {
+        category: "Channel Control",
+        keys: [
+            { key: "allowed_channels", label: "Allowed Channels", desc: "Only respond in these (empty = all)", type: "channels" },
+            { key: "ignored_channels", label: "Ignored Channels", desc: "Never respond in these", type: "channels" },
+        ]
+    },
+    {
+        category: "User Control",
+        keys: [
+            { key: "ignored_users", label: "Ignored Users", desc: "Comma-separated Discord user IDs", type: "text" },
+            { key: "learn_from_bots", label: "Include Bot Messages", desc: "Read bot messages for LLM context", type: "toggle" },
+        ]
+    },
+    {
+        category: "Fun & Randomness",
+        keys: [
+            { key: "reaction_chance", label: "Reaction Chance", desc: "React with emoji instead of replying", type: "range" },
+            { key: "gif_chance", label: "GIF Chance", desc: "Send a GIF instead of text", type: "range" },
+            { key: "indirect_reply_chance", label: "Indirect Reply", desc: "Reply during active conversation", type: "range" },
+            { key: "random_reply_chance", label: "Random Reply", desc: "Reply to the triggering message", type: "range" },
+            { key: "random_mention_chance", label: "Random Mention", desc: "@mention the user in response", type: "range" },
+        ]
+    }
+];
+
+const CHATTINESS_LABELS = [
+    "", "1 - Mute", "2", "3 - Quiet", "4",
+    "5 - Average", "6", "7 - Chatty", "8", "9", "10 - Nonstop"
+];
+
+// ==========================================
+// INIT
+// ==========================================
+async function init() {
+    try {
+        const res = await fetch("/api/guilds");
+        const guilds = await res.json();
+        const sel = document.getElementById("guild-select");
+        guilds.forEach(g => {
+            const opt = document.createElement("option");
+            opt.value = g.id;
+            opt.textContent = g.name;
+            sel.appendChild(opt);
+        });
+        if (guilds.length > 0) {
+            selectGuild(guilds[0].id);
+        }
+    } catch (e) {
+        showToast("Could not connect to bot API", "error");
+    }
+}
+
+// ==========================================
+// GUILD SELECTION
+// ==========================================
+function selectGuild(guildId) {
+    currentGuild = guildId;
+    loadSettings(guildId);
+    loadStats(guildId);
+    loadMemories(guildId);
+    loadChannels(guildId);
+    document.getElementById("empty-msg").style.display = "none";
+}
+
+// ==========================================
+// TABS
+// ==========================================
+function switchTab(name) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+    document.querySelector(`.tab[data-tab="${name}"]`).classList.add("active");
+    document.getElementById(`tab-${name}`).classList.add("active");
+}
+
+// ==========================================
+// SETTINGS
+// ==========================================
+async function loadSettings(guildId) {
+    try {
+        const res = await fetch(`/api/guilds/${guildId}/settings`);
+        currentSettings = await res.json();
+        renderSettings();
+        updateChattinessSlider();
+        hasUnsaved = false;
+        updateUnsavedIndicator();
+    } catch (e) {
+        showToast("Failed to load settings", "error");
+    }
+}
+
+function renderSettings() {
+    const container = document.getElementById("settings-container");
+    container.innerHTML = "";
+
+    SETTINGS.forEach(cat => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `<h3>${cat.category}</h3>`;
+
+        cat.keys.forEach(cfg => {
+            const row = document.createElement("div");
+            row.className = "setting-row";
+
+            const val = currentSettings[cfg.key];
+            const info = document.createElement("div");
+            info.className = "setting-info";
+            info.innerHTML = `<div class="setting-name">${cfg.label}</div><div class="setting-desc">${cfg.desc}</div>`;
+
+            const ctrl = document.createElement("div");
+            ctrl.className = "setting-control";
+
+            if (cfg.type === "toggle") {
+                ctrl.innerHTML = `
+                    <label class="toggle">
+                        <input type="checkbox" id="s-${cfg.key}" ${val ? "checked" : ""} onchange="markUnsaved()">
+                        <span class="slider"></span>
+                    </label>`;
+            } else if (cfg.type === "range") {
+                const pct = Math.round((val || 0) * 100);
+                ctrl.innerHTML = `
+                    <div class="range-wrap">
+                        <input type="range" id="s-${cfg.key}" min="0" max="1" step="0.05" value="${val || 0}" oninput="updateRangeLabel('${cfg.key}'); markUnsaved()">
+                        <span class="range-val" id="v-${cfg.key}">${pct}%</span>
+                    </div>`;
+            } else if (cfg.type === "number") {
+                ctrl.innerHTML = `<input type="number" class="ctrl-input narrow" id="s-${cfg.key}" min="${cfg.min}" max="${cfg.max}" value="${val}" onchange="markUnsaved()">`;
+            } else if (cfg.type === "text") {
+                ctrl.innerHTML = `<input type="text" class="ctrl-input" id="s-${cfg.key}" value="${val || ""}" onchange="markUnsaved()">`;
+            } else if (cfg.type === "select") {
+                let opts = (cfg.options || []).map(o =>
+                    `<option value="${o}" ${val === o ? "selected" : ""}>${o}</option>`
+                ).join("");
+                ctrl.innerHTML = `<select class="ctrl-select" id="s-${cfg.key}" onchange="markUnsaved()">${opts}</select>`;
+            } else if (cfg.type === "channels") {
+                ctrl.innerHTML = `<div class="channel-list" id="ch-${cfg.key}">Loading channels...</div>`;
+            }
+
+            row.appendChild(info);
+            row.appendChild(ctrl);
+            card.appendChild(row);
+        });
+
+        container.appendChild(card);
+    });
+
+    // Render channel lists after DOM is ready
+    renderChannelChecklists();
+}
+
+function updateRangeLabel(key) {
+    const input = document.getElementById(`s-${key}`);
+    const label = document.getElementById(`v-${key}`);
+    if (input && label) {
+        label.textContent = Math.round(parseFloat(input.value) * 100) + "%";
+    }
+}
+
+// ==========================================
+// CHANNELS
+// ==========================================
+async function loadChannels(guildId) {
+    try {
+        const res = await fetch(`/api/guilds/${guildId}/channels`);
+        channelList = await res.json();
+        renderChannelChecklists();
+    } catch (e) {
+        channelList = [];
+    }
+}
+
+function renderChannelChecklists() {
+    ["allowed_channels", "ignored_channels"].forEach(key => {
+        const container = document.getElementById(`ch-${key}`);
+        if (!container || channelList.length === 0) return;
+
+        const selected = currentSettings[key] || [];
+        container.innerHTML = "";
+
+        channelList.forEach(ch => {
+            const tag = document.createElement("div");
+            tag.className = "channel-tag" + (selected.includes(ch.id) ? " selected" : "");
+            tag.innerHTML = `<input type="checkbox" value="${ch.id}"><span class="check">${selected.includes(ch.id) ? "✓" : ""}</span> ${ch.name}`;
+            tag.onclick = () => {
+                const cb = tag.querySelector("input");
+                cb.checked = !cb.checked;
+                tag.classList.toggle("selected");
+                tag.querySelector(".check").textContent = cb.checked ? "✓" : "";
+                markUnsaved();
+            };
+            container.appendChild(tag);
+        });
+    });
+}
+
+// ==========================================
+// SAVE SETTINGS
+// ==========================================
+async function saveSettings() {
+    const updates = {};
+
+    SETTINGS.forEach(cat => {
+        cat.keys.forEach(cfg => {
+            const el = document.getElementById(`s-${cfg.key}`);
+            if (!el) return;
+
+            if (cfg.type === "toggle") {
+                updates[cfg.key] = el.checked;
+            } else if (cfg.type === "range") {
+                updates[cfg.key] = parseFloat(el.value);
+            } else if (cfg.type === "number") {
+                updates[cfg.key] = parseInt(el.value) || 0;
+            } else if (cfg.type === "text") {
+                updates[cfg.key] = el.value;
+            } else if (cfg.type === "select") {
+                updates[cfg.key] = el.value;
+            }
+        });
+    });
+
+    // Collect channel selections
+    ["allowed_channels", "ignored_channels"].forEach(key => {
+        const container = document.getElementById(`ch-${key}`);
+        if (!container) return;
+        const checked = [];
+        container.querySelectorAll("input[type=checkbox]:checked").forEach(cb => {
+            checked.push(parseInt(cb.value));
+        });
+        updates[key] = checked;
+    });
+
+    try {
+        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ updates })
+        });
+        if (res.ok) {
+            showToast("Settings saved!", "success");
+            hasUnsaved = false;
+            updateUnsavedIndicator();
+            loadSettings(currentGuild);
+        } else {
+            const err = await res.json();
+            showToast("Save failed: " + (err.detail || "Unknown error"), "error");
+        }
+    } catch (e) {
+        showToast("Network error while saving", "error");
+    }
+}
+
+function reloadSettings() {
+    if (currentGuild) {
+        loadSettings(currentGuild);
+        showToast("Settings reloaded", "success");
+    }
+}
+
+function markUnsaved() {
+    hasUnsaved = true;
+    updateUnsavedIndicator();
+}
+
+function updateUnsavedIndicator() {
+    const el = document.getElementById("unsaved-indicator");
+    el.innerHTML = hasUnsaved ? '<span class="unsaved-dot"></span>Unsaved changes' : "";
+}
+
+// ==========================================
+// CHATTINESS
+// ==========================================
+function updateChattinessSlider() {
+    const chance = currentSettings.response_chance || 0.15;
+    const level = Math.round(chance / 0.03);
+    const clamped = Math.max(1, Math.min(10, level));
+    const slider = document.getElementById("chattiness-slider");
+    const label = document.getElementById("chattiness-label");
+    if (slider) slider.value = clamped;
+    if (label) label.textContent = CHATTINESS_LABELS[clamped] || `${clamped}`;
+}
+
+function onChattinessChange(val) {
+    const level = parseInt(val);
+    const chance = round(level * 0.03, 2);
+    document.getElementById("chattiness-label").textContent = CHATTINESS_LABELS[level] || `${level}`;
+    const el = document.getElementById("s-response_chance");
+    if (el) {
+        el.value = chance;
+        updateRangeLabel("response_chance");
+        markUnsaved();
+    }
+}
+
+function round(num, decimals) {
+    return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
+}
+
+// ==========================================
+// STATS
+// ==========================================
+async function loadStats(guildId) {
+    try {
+        const res = await fetch(`/api/guilds/${guildId}/stats`);
+        const stats = await res.json();
+        document.getElementById("stat-sent").textContent = stats.messages_sent || 0;
+        document.getElementById("stat-processed").textContent = stats.messages_learned || 0;
+    } catch (e) {
+        document.getElementById("stat-sent").textContent = "-";
+        document.getElementById("stat-processed").textContent = "-";
+    }
+}
+
+// ==========================================
+// MEMORIES
+// ==========================================
+async function loadMemories(guildId) {
+    // User memories
+    try {
+        const res = await fetch(`/api/guilds/${guildId}/memories`);
+        const memories = await res.json();
+        const tbody = document.getElementById("mem-tbody");
+        const empty = document.getElementById("mem-empty");
+
+        if (!memories || memories.length === 0) {
+            tbody.innerHTML = "";
+            empty.style.display = "block";
+        } else {
+            empty.style.display = "none";
+            tbody.innerHTML = memories.map(m => `
+                <tr>
+                    <td>${m.user_id}</td>
+                    <td class="mem-note">${escapeHtml(m.note)}</td>
+                    <td><button class="btn btn-danger btn-sm" onclick="deleteMemory(${m.user_id})">Delete</button></td>
+                </tr>
+            `).join("");
+        }
+    } catch (e) {
+        document.getElementById("mem-tbody").innerHTML = "";
+    }
+
+    // Consolidated memory
+    try {
+        const res = await fetch(`/api/guilds/${guildId}/consolidated`);
+        const data = await res.json();
+        const display = document.getElementById("consolidated-display");
+        if (data && data.summary) {
+            display.innerHTML = `<div class="consolidated-text">${escapeHtml(data.summary)}</div>`;
+        } else {
+            display.innerHTML = '<div class="no-data">No consolidated memory yet</div>';
+        }
+    } catch (e) {
+        document.getElementById("consolidated-display").innerHTML = '<div class="no-data">Could not load</div>';
+    }
+}
+
+async function addMemory() {
+    const userId = parseInt(document.getElementById("mem-user-id").value);
+    const note = document.getElementById("mem-note").value.trim();
+    if (!userId || !note) {
+        showToast("Enter both User ID and a memory", "error");
+        return;
+    }
+    try {
+        const res = await fetch(`/api/guilds/${currentGuild}/memories`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ user_id: userId, note })
+        });
+        if (res.ok) {
+            document.getElementById("mem-user-id").value = "";
+            document.getElementById("mem-note").value = "";
+            loadMemories(currentGuild);
+            showToast("Memory added!", "success");
+        } else {
+            showToast("Failed to add memory", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+async function deleteMemory(userId) {
+    if (!confirm("Delete all memories for this user?")) return;
+    try {
+        await fetch(`/api/guilds/${currentGuild}/memories/${userId}`, { method: "DELETE" });
+        loadMemories(currentGuild);
+        showToast("Memories deleted", "success");
+    } catch (e) {
+        showToast("Failed to delete", "error");
+    }
+}
+
+// ==========================================
+// UTILS
+// ==========================================
+function showToast(msg, type) {
+    const toast = document.getElementById("toast");
+    toast.textContent = msg;
+    toast.className = `toast ${type} show`;
+    setTimeout(() => toast.classList.remove("show"), 3000);
+}
+
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ==========================================
+// BOOT
+// ==========================================
+document.getElementById("guild-select").addEventListener("change", (e) => {
+    if (e.target.value) selectGuild(parseInt(e.target.value));
+});
+
+init();
+</script>
+</body>
+</html>

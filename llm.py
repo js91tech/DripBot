@@ -10,17 +10,21 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
         print("ERROR: OPENROUTER_API_KEY is missing from environment variables!")
         return None
 
+    # Fallback model if none specified
     if not model_name:
-        model_name = "meta-llama/llama-3-8b-instruct"
+        # Legacy: check if old code passed model in first message
+        if chat_history and "model" in chat_history[0]:
+            model_name = chat_history[0]["model"]
+            chat_history = chat_history[1:]  # strip it out
+        else:
+            model_name = "meta-llama/llama-3-8b-instruct"
 
-    # Build the messages list: system prompt first, then all chat history
-    # FIX: No longer skips messages with "model" key - that was discarding
-    # legitimate messages. The legacy "model in first message" hack is removed.
+    # Format the messages for the API — skip any legacy model keys
     messages = [{"role": "system", "content": system_prompt}]
     for msg in chat_history:
-        # Only include messages that have a valid "role" and "content"
-        if "role" in msg and "content" in msg:
-            messages.append({"role": msg["role"], "content": msg["content"]})
+        if "model" in msg:
+            continue
+        messages.append(msg)
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -32,8 +36,8 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
     data = {
         "model": model_name,
         "messages": messages,
-        "max_tokens": 150,
-        "temperature": 0.9
+        "max_tokens": 150,  # Keep it short like a Discord message
+        "temperature": 0.9  # A little creative
     }
 
     try:

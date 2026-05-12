@@ -1,6 +1,6 @@
-import api as api_module
 from config.settings_manager import SettingsManager
 from engine.database import Database
+import api as api_module
 from api import run_api
 import os
 import sys
@@ -10,19 +10,22 @@ import threading
 import asyncio
 
 # ==========================================
-# PATH SETUP
+# BULLETPROOF PATH & FILE DIAGNOSTIC ENGINE
 # ==========================================
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Force Python to look IN THIS EXACT FOLDER for imports
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
-# Verify core files exist
+# Verify the core files and subfolders exist before we even try to import them
 required_files = ['api.py']
 missing_files = [f for f in required_files if not os.path.exists(os.path.join(CURRENT_DIR, f))]
 
 if missing_files:
-    print(f"CRITICAL ERROR: Missing files in {CURRENT_DIR}: {', '.join(missing_files)}")
+    print(
+        f"CRITICAL ERROR: Missing files in {CURRENT_DIR}: {', '.join(missing_files)}"
+    )
     sys.exit(1)
 
 if not os.path.exists(os.path.join(CURRENT_DIR, 'engine', 'database.py')):
@@ -32,22 +35,23 @@ if not os.path.exists(os.path.join(CURRENT_DIR, 'engine', 'database.py')):
 if not os.path.exists(os.path.join(CURRENT_DIR, 'config', 'settings_manager.py')):
     print("CRITICAL ERROR: Missing config/settings_manager.py!")
     sys.exit(1)
+# ==========================================
 
-# ==========================================
-# BOT INTENTS
-# ==========================================
+
+# IMPORT FROM YOUR EXACT FOLDERS
+
+# --- BOT INTENTS ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-# FIX: Use "!" prefix instead of "/" which conflicts with Discord slash commands
-COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "!")
+# --- BOT CLASS ---
 
 
 class MarkovLLMBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix=COMMAND_PREFIX,
+            command_prefix="/",
             intents=intents
         )
         self.db = None
@@ -55,6 +59,7 @@ class MarkovLLMBot(commands.Bot):
 
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
+
         # Capture event loop for cross-thread API access
         api_module.bot_loop = asyncio.get_running_loop()
 
@@ -74,13 +79,17 @@ class MarkovLLMBot(commands.Bot):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print("------")
 
-
 # --- INITIALIZE AND RUN ---
+
+
 bot = MarkovLLMBot()
-api_module.bot_instance = bot
+api_module.bot_instance = bot  # FIX: update the actual module-level variable
 
 print("Starting API dashboard thread...")
-threading.Thread(target=run_api, daemon=True).start()
+if not os.environ.get("RENDER", ""):
+    threading.Thread(target=run_api, daemon=True).start()
+else:
+    print("Render detected — skipping dashboard (prevents restart loop)")
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:

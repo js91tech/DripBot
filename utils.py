@@ -1,10 +1,10 @@
 import aiohttp
-import re
 import random
+import re
 
 
 async def search_gif(query):
-    """Searches Tenor directly for a random GIF without needing an API key."""
+    """Search Tenor for a random GIF (no API key needed)."""
     url = f"https://tenor.com/search/{query}-gifs"
     try:
         async with aiohttp.ClientSession() as session:
@@ -15,10 +15,15 @@ async def search_gif(query):
                     "Chrome/91.0.4472.124 Safari/537.36"
                 )
             }
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(
+                url, headers=headers
+            ) as resp:
                 if resp.status == 200:
                     text = await resp.text()
-                    gif_urls = re.findall(r'https://media\.tenor\.com/[^"\s]+\.gif', text)
+                    gif_urls = re.findall(
+                        r'https://media\.tenor\.com/[^"\s]+\.gif',
+                        text,
+                    )
                     if gif_urls:
                         return random.choice(gif_urls)
     except Exception as e:
@@ -27,12 +32,9 @@ async def search_gif(query):
 
 
 def sanitize_message(text):
-    """Cleans up bot messages to prevent Discord API errors."""
-    # Remove @everyone and @here to prevent mass pings
+    """Clean bot messages for Discord API compliance."""
     text = text.replace("@everyone", "").replace("@here", "")
-    # Remove duplicate whitespace
     text = re.sub(r'\s+', ' ', text).strip()
-    # Discord messages have a 2000 character limit
     if len(text) > 1950:
         text = text[:1950] + "..."
     return text
