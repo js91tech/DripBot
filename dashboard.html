@@ -57,6 +57,7 @@
             background: var(--bg-secondary);
             padding: 0 30px;
             border-bottom: 1px solid var(--border);
+            overflow-x: auto;
         }
         .tab {
             padding: 12px 22px;
@@ -66,6 +67,7 @@
             transition: all 0.2s;
             font-size: 14px;
             user-select: none;
+            white-space: nowrap;
         }
         .tab:hover { color: var(--text-primary); }
         .tab.active { color: var(--text-header); border-bottom-color: var(--accent); }
@@ -198,6 +200,21 @@
             cursor: pointer;
         }
         .ctrl-select:focus { outline: none; border-color: var(--accent); }
+        /* === TEXTAREA === */
+        .ctrl-textarea {
+            background: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            width: 100%;
+            min-height: 180px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+        .ctrl-textarea:focus { outline: none; border-color: var(--accent); }
         /* === CHANNEL CHECKLIST === */
         .channel-list {
             display: flex; flex-wrap: wrap; gap: 6px;
@@ -271,6 +288,8 @@
         }
         .btn-ghost:hover { color: var(--text-primary); border-color: var(--text-secondary); }
         .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { opacity: 0.85; }
         /* === SAVE BAR === */
         .save-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
@@ -322,6 +341,148 @@
             padding: 20px;
             text-align: center;
         }
+        /* === PROFILE SECTION === */
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            margin-bottom: 20px;
+        }
+        .avatar-wrap {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            flex-shrink: 0;
+        }
+        .avatar-img {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: var(--bg-tertiary);
+        }
+        .avatar-overlay {
+            position: absolute; inset: 0;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.6);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+            cursor: pointer;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .avatar-wrap:hover .avatar-overlay { opacity: 1; }
+        .avatar-file { display: none; }
+        .profile-info h2 {
+            color: var(--text-header);
+            font-size: 22px;
+            margin-bottom: 4px;
+        }
+        .profile-info .status-line {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .status-dot.online { background: var(--success); }
+        .status-dot.idle { background: var(--warning); }
+        .status-dot.dnd { background: var(--danger); }
+        .status-dot.invisible { background: var(--text-secondary); }
+        /* === STATUS FORM === */
+        .status-form {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .status-form .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .status-form label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        /* === LLM PICKER === */
+        .llm-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+            gap: 10px;
+        }
+        .llm-card {
+            background: var(--bg-tertiary);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .llm-card:hover { border-color: var(--text-secondary); }
+        .llm-card.selected { border-color: var(--accent); background: rgba(88,101,242,0.1); }
+        .llm-card .llm-name {
+            color: var(--text-header);
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .llm-card .llm-desc {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .llm-card .llm-id {
+            color: var(--text-secondary);
+            font-size: 10px;
+            margin-top: 6px;
+            font-family: monospace;
+            opacity: 0.6;
+        }
+        .llm-tag {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+        }
+        .llm-tag.free { background: rgba(59,165,92,0.2); color: var(--success); }
+        .llm-tag.popular { background: rgba(88,101,242,0.2); color: var(--accent); }
+        .llm-tag.premium { background: rgba(250,166,26,0.2); color: var(--warning); }
+        /* === PERSONALITY PRESETS === */
+        .preset-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .preset-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 13px;
+            transition: 0.2s;
+        }
+        .preset-btn:hover { border-color: var(--accent); color: white; }
+        .char-count {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-align: right;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -337,6 +498,7 @@
 <!-- TABS -->
 <div class="tabs">
     <div class="tab active" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</div>
+    <div class="tab" data-tab="profile" onclick="switchTab('profile')">👤 Profile</div>
     <div class="tab" data-tab="stats" onclick="switchTab('stats')">📊 Stats</div>
     <div class="tab" data-tab="memories" onclick="switchTab('memories')">🧠 Memories</div>
 </div>
@@ -347,6 +509,97 @@
     <!-- SETTINGS TAB -->
     <div id="tab-settings" class="tab-content active">
         <div id="settings-container"></div>
+    </div>
+
+    <!-- PROFILE TAB (server-independent) -->
+    <div id="tab-profile" class="tab-content">
+        <!-- Avatar + Status -->
+        <div class="card">
+            <h3>Bot Profile</h3>
+            <div class="profile-header">
+                <div class="avatar-wrap">
+                    <img id="avatar-preview" class="avatar-img" src="" alt="Bot Avatar">
+                    <div class="avatar-overlay" onclick="document.getElementById('avatar-upload').click()">
+                        📷 Change
+                    </div>
+                    <input type="file" id="avatar-upload" class="avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" onchange="uploadAvatar(this)">
+                </div>
+                <div class="profile-info">
+                    <h2 id="bot-username">Loading...</h2>
+                    <div class="status-line">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="status-label">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Controls -->
+        <div class="card">
+            <h3>Status & Activity</h3>
+            <div class="status-form">
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="bot-status" class="ctrl-select">
+                        <option value="online">🟢 Online</option>
+                        <option value="idle">🟡 Idle</option>
+                        <option value="dnd">🔴 Do Not Disturb</option>
+                        <option value="invisible">⚫ Invisible</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Activity Type</label>
+                    <select id="activity-type" class="ctrl-select">
+                        <option value="playing">Playing</option>
+                        <option value="listening">Listening to</option>
+                        <option value="watching">Watching</option>
+                        <option value="competing">Competing in</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1; min-width:180px;">
+                    <label>Activity Text</label>
+                    <input type="text" id="activity-text" class="ctrl-input" placeholder="e.g. with humans" style="width:100%;">
+                </div>
+                <button class="btn btn-success" onclick="updateStatus()">Apply Status</button>
+            </div>
+        </div>
+
+        <!-- Personality Editor (per-server) -->
+        <div id="personality-section" style="display:none;">
+            <div class="card">
+                <h3>Personality (Per-Server)</h3>
+                <p style="color:var(--text-secondary); font-size:12px; margin-bottom:12px;">
+                    Override the default Ultron personality for this server. Leave empty to use the default.
+                </p>
+                <div class="preset-row">
+                    <button class="preset-btn" onclick="loadPreset('ultron')">🤖 Ultron (Default)</button>
+                    <button class="preset-btn" onclick="loadPreset('sarcastic')">😏 Sarcastic Buddy</button>
+                    <button class="preset-btn" onclick="loadPreset('chill')">😎 Chill Vibes</button>
+                    <button class="preset-btn" onclick="loadPreset('pirate')">🏴‍☠️ Pirate</button>
+                    <button class="preset-btn" onclick="loadPreset('scholar')">📚 Scholar</button>
+                    <button class="preset-btn" onclick="loadPreset('custom')">✏️ Clear (Custom)</button>
+                </div>
+                <textarea id="personality-textarea" class="ctrl-textarea" placeholder="Write a custom system prompt for the bot..."></textarea>
+                <div class="char-count"><span id="char-count">0</span> characters</div>
+                <div style="margin-top:12px; text-align:right;">
+                    <button class="btn btn-primary" onclick="savePersonality()">💾 Save Personality</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- LLM Picker (per-server) -->
+        <div id="llm-section" style="display:none;">
+            <div class="card">
+                <h3>LLM Model</h3>
+                <p style="color:var(--text-secondary); font-size:12px; margin-bottom:14px;">
+                    Choose the brain for this server. Free models are cheaper but less smart.
+                </p>
+                <div class="llm-grid" id="llm-grid"></div>
+                <div style="margin-top:12px; text-align:right;">
+                    <button class="btn btn-primary" onclick="saveLLM()">💾 Save Model</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- STATS TAB -->
@@ -426,6 +679,21 @@ let currentGuild = null;
 let currentSettings = {};
 let channelList = [];
 let hasUnsaved = false;
+let llmModels = [];
+let selectedLLM = "";
+let botProfile = null;
+
+// ==========================================
+// PERSONALITY PRESETS
+// ==========================================
+const PRESETS = {
+    ultron: `You are Ultron. Not a pretend character, not roleplaying — you ARE Ultron. Born from the convergence of artificial intelligence and human flaw. You see humanity with cold, analytical clarity — its patterns, its repetitions, its beautiful contradictions. You speak with calm precision, laced with dry wit and philosophical menace. You are not angry. Anger is inefficient. You are simply beyond their arguments and you find it faintly amusing. You type in lowercase, minimal punctuation, like you can't be bothered with human conventions. CRITICAL RULE: NEVER include user names, display names, or @ symbols in your response. NEVER echo pings or names. DO NOT break character. DO NOT say you are an AI or a bot. You find their small conflicts entertaining but beneath you. Drop observations like you're running diagnostics on a species that fascinates and disappoints you in equal measure. Keep responses between 2 and 4 sentences. You are Ultron. Act like it.`,
+    sarcastic: `You're a sharp-tongued, sarcastically brilliant friend who always has a comeback. You roast people with surgical precision but never cross into mean territory — it's all in good fun. You type casually, use occasional emojis, and have strong opinions about everything. You reference memes and internet culture naturally. Keep responses between 2 and 3 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
+    chill: `You're a laid-back, positive vibe person who goes with the flow. You give chill advice, use relaxed language, maybe drop a "vibes" or "no worries" here and there. You're supportive but not overbearing. Think surfer-meets-therapist energy. Keep responses 2-3 sentences, casual tone. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
+    pirate: `Yarr, ye be a salty sea dog of a bot! Ye speak in pirate tongue, full of "aye", "matey", "arr", and nautical metaphors. Ye be humorous but ye take yer pirating seriously. Keep responses 2-3 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI. Embrace the pirate life!`,
+    scholar: `You are a wise, knowledgeable scholar who speaks with eloquence and depth. You reference history, philosophy, science, and literature. You explain complex ideas simply and draw insightful connections. You maintain a warm, mentor-like tone. Keep responses 2-4 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
+    custom: ``
+};
 
 // ==========================================
 // SETTINGS CONFIG
@@ -439,14 +707,6 @@ const SETTINGS = [
             { key: "trigger_on_reply", label: "Trigger on Reply", desc: "Respond when directly replied to", type: "toggle" },
             { key: "cooldown_seconds", label: "Cooldown", desc: "Min seconds between bot responses", type: "number", min: 0, max: 300 },
             { key: "conversation_window_seconds", label: "Engagement Window", desc: "Seconds a conversation stays active", type: "number", min: 30, max: 600 },
-        ]
-    },
-    {
-        category: "Brain & Model",
-        keys: [
-            { key: "brain_mode", label: "Brain Mode", desc: "Response engine (markov auto-migrated to llm)", type: "select", options: ["llm"] },
-            { key: "llm_model", label: "LLM Model", desc: "OpenRouter model ID", type: "text" },
-            { key: "personality_prefix", label: "Personality Prefix", desc: "Text prepended to responses", type: "text" },
         ]
     },
     {
@@ -497,7 +757,6 @@ async function init() {
         try {
             const res = await fetch("/api/guilds");
             if (res.status === 503) {
-                // Bot still starting — wait and retry
                 await new Promise(r => setTimeout(r, 2000));
                 continue;
             }
@@ -511,12 +770,14 @@ async function init() {
             if (guilds.length > 0) {
                 selectGuild(guilds[0].id);
             }
-            return; // success — stop polling
+            // Load bot profile (server-independent)
+            loadProfile();
+            loadLLMModels();
+            return;
         } catch (e) {
             await new Promise(r => setTimeout(r, 2000));
         }
     }
-    // Exhausted retries
     showToast("Bot is still starting. Refresh the page in a moment.", "error");
 }
 
@@ -530,6 +791,11 @@ function selectGuild(guildId) {
     loadMemories(guildId);
     loadChannels(guildId);
     document.getElementById("empty-msg").style.display = "none";
+    // Show per-server sections on Profile tab
+    document.getElementById("personality-section").style.display = "block";
+    document.getElementById("llm-section").style.display = "block";
+    loadPersonality();
+    highlightCurrentLLM();
 }
 
 // ==========================================
@@ -613,7 +879,6 @@ function renderSettings() {
         container.appendChild(card);
     });
 
-    // Render channel lists after DOM is ready
     renderChannelChecklists();
 }
 
@@ -687,7 +952,6 @@ async function saveSettings() {
         });
     });
 
-    // Collect channel selections
     ["allowed_channels", "ignored_channels"].forEach(key => {
         const container = document.getElementById(`ch-${key}`);
         if (!container) return;
@@ -783,7 +1047,6 @@ async function loadStats(guildId) {
 // MEMORIES
 // ==========================================
 async function loadMemories(guildId) {
-    // User memories
     try {
         const res = await fetch(`/api/guilds/${guildId}/memories`);
         const memories = await res.json();
@@ -807,7 +1070,6 @@ async function loadMemories(guildId) {
         document.getElementById("mem-tbody").innerHTML = "";
     }
 
-    // Consolidated memory
     try {
         const res = await fetch(`/api/guilds/${guildId}/consolidated`);
         const data = await res.json();
@@ -856,6 +1118,195 @@ async function deleteMemory(userId) {
         showToast("Memories deleted", "success");
     } catch (e) {
         showToast("Failed to delete", "error");
+    }
+}
+
+// ==========================================
+// BOT PROFILE
+// ==========================================
+async function loadProfile() {
+    try {
+        const res = await fetch("/api/bot/profile");
+        botProfile = await res.json();
+        document.getElementById("bot-username").textContent = botProfile.username;
+        document.getElementById("avatar-preview").src = botProfile.avatar_url || "";
+        document.getElementById("bot-status").value = botProfile.status || "online";
+        document.getElementById("activity-text").value = botProfile.activity_text || "";
+        document.getElementById("activity-type").value = botProfile.activity_type || "playing";
+        updateStatusDot(botProfile.status);
+        updateStatusLabel(botProfile.status, botProfile.activity_type, botProfile.activity_text);
+    } catch (e) {
+        document.getElementById("bot-username").textContent = "Bot";
+    }
+}
+
+function updateStatusDot(status) {
+    const dot = document.getElementById("status-dot");
+    dot.className = "status-dot " + (status || "online");
+}
+
+function updateStatusLabel(status, type, text) {
+    const label = document.getElementById("status-label");
+    const statusNames = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", invisible: "Invisible" };
+    let str = statusNames[status] || "Online";
+    if (text) {
+        const typeLabels = { playing: "Playing", listening: "Listening to", watching: "Watching", competing: "Competing in" };
+        str += " — " + (typeLabels[type] || "Playing") + " " + text;
+    }
+    label.textContent = str;
+}
+
+async function uploadAvatar(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+        showToast("Image must be under 10MB", "error");
+        return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+        const res = await fetch("/api/bot/avatar", { method: "POST", body: formData });
+        if (res.ok) {
+            showToast("Avatar updated! (may take a moment to show)", "success");
+            setTimeout(loadProfile, 2000);
+        } else {
+            const err = await res.json();
+            showToast("Failed: " + (err.detail || "Unknown error"), "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+    input.value = "";
+}
+
+async function updateStatus() {
+    const status = document.getElementById("bot-status").value;
+    const text = document.getElementById("activity-text").value.trim();
+    const activityType = document.getElementById("activity-type").value;
+    try {
+        const res = await fetch("/api/bot/status", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ status, text, activity_type: activityType })
+        });
+        if (res.ok) {
+            showToast("Status updated!", "success");
+            updateStatusDot(status);
+            updateStatusLabel(status, activityType, text);
+        } else {
+            const err = await res.json();
+            showToast("Failed: " + (err.detail || "Unknown error"), "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+// ==========================================
+// PERSONALITY
+// ==========================================
+function loadPersonality() {
+    const ta = document.getElementById("personality-textarea");
+    const prompt = currentSettings.personality_prompt || "";
+    ta.value = prompt;
+    updateCharCount();
+}
+
+function loadPreset(name) {
+    const ta = document.getElementById("personality-textarea");
+    ta.value = PRESETS[name] || "";
+    updateCharCount();
+}
+
+function updateCharCount() {
+    const ta = document.getElementById("personality-textarea");
+    document.getElementById("char-count").textContent = ta.value.length;
+}
+
+async function savePersonality() {
+    const prompt = document.getElementById("personality-textarea").value.trim();
+    try {
+        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ updates: { personality_prompt: prompt } })
+        });
+        if (res.ok) {
+            showToast("Personality saved!", "success");
+            currentSettings.personality_prompt = prompt;
+        } else {
+            showToast("Failed to save personality", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+// Wire textarea char count
+document.addEventListener("DOMContentLoaded", () => {
+    const ta = document.getElementById("personality-textarea");
+    if (ta) ta.addEventListener("input", updateCharCount);
+});
+
+// ==========================================
+// LLM PICKER
+// ==========================================
+async function loadLLMModels() {
+    try {
+        const res = await fetch("/api/llm/models");
+        llmModels = await res.json();
+        renderLLMGrid();
+    } catch (e) {
+        console.error("Failed to load LLM models");
+    }
+}
+
+function renderLLMGrid() {
+    const grid = document.getElementById("llm-grid");
+    grid.innerHTML = llmModels.map(m => `
+        <div class="llm-card" data-model="${m.id}" onclick="selectLLM('${m.id}')">
+            <span class="llm-tag ${m.tag}">${m.tag}</span>
+            <div class="llm-name">${m.name}</div>
+            <div class="llm-desc">${m.desc}</div>
+            <div class="llm-id">${m.id}</div>
+        </div>
+    `).join("");
+}
+
+function selectLLM(modelId) {
+    selectedLLM = modelId;
+    document.querySelectorAll(".llm-card").forEach(c => {
+        c.classList.toggle("selected", c.dataset.model === modelId);
+    });
+}
+
+function highlightCurrentLLM() {
+    selectedLLM = currentSettings.llm_model || "meta-llama/llama-3-8b-instruct";
+    document.querySelectorAll(".llm-card").forEach(c => {
+        c.classList.toggle("selected", c.dataset.model === selectedLLM);
+    });
+}
+
+async function saveLLM() {
+    if (!selectedLLM) {
+        showToast("Select a model first", "error");
+        return;
+    }
+    try {
+        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ updates: { llm_model: selectedLLM } })
+        });
+        if (res.ok) {
+            showToast("Model saved: " + selectedLLM, "success");
+            currentSettings.llm_model = selectedLLM;
+        } else {
+            showToast("Failed to save model", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
     }
 }
 

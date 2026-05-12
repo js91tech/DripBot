@@ -565,6 +565,12 @@ class Chat(commands.Cog):
                 )
 
                 dynamic_prompt = BASE_SECRET_PROMPT
+                # Per-server personality override
+                custom_personality = settings.get(
+                    "personality_prompt", ""
+                )
+                if custom_personality and custom_personality.strip():
+                    dynamic_prompt = custom_personality.strip()
                 if consolidated and consolidated.get("summary"):
                     dynamic_prompt += (
                         f"\n\nCONTEXT OF SERVER CULTURE:\n"

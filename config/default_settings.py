@@ -45,6 +45,7 @@ DEFAULTS = {
     "random_mention_chance": 0.10,
     "gif_chance": 0.10,
     "personality_prefix": "",
+    "personality_prompt": "",
     "llm_model": "meta-llama/llama-3-8b-instruct",
     "response_chance": 0.15,
     # Image generation

@@ -4,3 +4,4 @@ aiosqlite==0.20.0
 fastapi
 uvicorn
 pydantic
+python-multipart

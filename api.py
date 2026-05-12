@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 import os
 import asyncio
+import discord
+from discord import ActivityType
 
 # ==========================================
 # MODULE-LEVEL REFERENCES (set by bot.py)
@@ -36,6 +38,12 @@ class SettingsUpdate(BaseModel):
 class MemoryAdd(BaseModel):
     user_id: int
     note: str
+
+
+class StatusUpdate(BaseModel):
+    status: str  # online, idle, dnd, invisible
+    text: str = ""
+    activity_type: str = "playing"  # playing, listening, watching, competing
 
 
 # ==========================================
@@ -163,6 +171,180 @@ async def get_consolidated(guild_id: int):
         bot_instance.db.get_consolidated_memory(guild_id)
     )
     return await data
+
+
+# ==========================================
+# BOT PROFILE ENDPOINTS
+# ==========================================
+@app.get("/api/bot/profile")
+async def get_profile():
+    """Return bot's current avatar, status, and name."""
+    if not bot_instance or not bot_ready:
+        raise HTTPException(503, "Bot not ready yet")
+    user = bot_instance.user
+    avatar_url = (
+        user.avatar.url if user.avatar else ""
+    )
+    status_map = {
+        discord.Status.online: "online",
+        discord.Status.idle: "idle",
+        discord.Status.dnd: "dnd",
+        discord.Status.invisible: "invisible",
+    }
+    status_str = status_map.get(
+        user.status, "online"
+    )
+    activity_text = ""
+    activity_type = ""
+    if user.activity:
+        activity_text = user.activity.name
+        type_map = {
+            ActivityType.playing: "playing",
+            ActivityType.listening: "listening",
+            ActivityType.watching: "watching",
+            ActivityType.competing: "competing",
+        }
+        activity_type = type_map.get(
+            user.activity.type, "playing"
+        )
+    return {
+        "username": user.name,
+        "avatar_url": avatar_url,
+        "status": status_str,
+        "activity_text": activity_text,
+        "activity_type": activity_type,
+    }
+
+
+@app.post("/api/bot/avatar")
+async def set_avatar(file: UploadFile = File(...)):
+    """Upload a new avatar for the bot."""
+    if not bot_instance or not bot_ready:
+        raise HTTPException(503, "Bot not ready yet")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(
+            400, "Image must be under 10MB"
+        )
+    try:
+        await _run_async(
+            bot_instance.user.edit(avatar=content)
+        )
+        return {"status": "ok"}
+    except discord.errors.HTTPException as e:
+        raise HTTPException(
+            400, f"Discord error: {e.text}"
+        )
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/bot/status")
+async def set_status(body: StatusUpdate):
+    """Set the bot's presence status and activity."""
+    if not bot_instance or not bot_ready:
+        raise HTTPException(503, "Bot not ready yet")
+    valid_statuses = {
+        "online": discord.Status.online,
+        "idle": discord.Status.idle,
+        "dnd": discord.Status.dnd,
+        "invisible": discord.Status.invisible,
+    }
+    status_val = valid_statuses.get(body.status)
+    if not status_val:
+        raise HTTPException(
+            400, f"Invalid status: {body.status}"
+        )
+    type_map = {
+        "playing": ActivityType.playing,
+        "listening": ActivityType.listening,
+        "watching": ActivityType.watching,
+        "competing": ActivityType.competing,
+    }
+    act_type = type_map.get(
+        body.activity_type, ActivityType.playing
+    )
+    activity = None
+    if body.text:
+        activity = discord.Activity(
+            type=act_type, name=body.text
+        )
+    try:
+        await _run_async(
+            bot_instance.change_presence(
+                status=status_val, activity=activity
+            )
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/llm/models")
+async def list_llm_models():
+    """Return curated list of LLM models on OpenRouter."""
+    return [
+        {
+            "id": "meta-llama/llama-3-8b-instruct",
+            "name": "Llama 3 8B",
+            "desc": "Fast, cheap, general-purpose chat",
+            "tag": "free",
+        },
+        {
+            "id": "meta-llama/llama-3-70b-instruct",
+            "name": "Llama 3 70B",
+            "desc": "Smarter than 8B, good balance of speed and quality",
+            "tag": "popular",
+        },
+        {
+            "id": "mistralai/mistral-7b-instruct",
+            "name": "Mistral 7B",
+            "desc": "Fast lightweight model, great at following instructions",
+            "tag": "free",
+        },
+        {
+            "id": "mistralai/mixtral-8x7b-instruct",
+            "name": "Mixtral 8x7B",
+            "desc": "Mixture-of-experts, strong reasoning",
+            "tag": "popular",
+        },
+        {
+            "id": "google/gemma-2-9b-it",
+            "name": "Gemma 2 9B",
+            "desc": "Google's efficient model, good at creative tasks",
+            "tag": "free",
+        },
+        {
+            "id": "anthropic/claude-3.5-sonnet",
+            "name": "Claude 3.5 Sonnet",
+            "desc": "Top-tier intelligence, great at nuance and long context",
+            "tag": "premium",
+        },
+        {
+            "id": "anthropic/claude-3-haiku",
+            "name": "Claude 3 Haiku",
+            "desc": "Fast Anthropic model, smart and responsive",
+            "tag": "premium",
+        },
+        {
+            "id": "openai/gpt-4o-mini",
+            "name": "GPT-4o Mini",
+            "desc": "OpenAI's efficient model, fast and capable",
+            "tag": "popular",
+        },
+        {
+            "id": "openai/gpt-4o",
+            "name": "GPT-4o",
+            "desc": "OpenAI's flagship model, best overall quality",
+            "tag": "premium",
+        },
+        {
+            "id": "nousresearch/nous-capybara-7b",
+            "name": "Capybara 7B",
+            "desc": "Creative and conversational, good for roleplay",
+            "tag": "free",
+        },
+    ]
 
 
 # ==========================================
