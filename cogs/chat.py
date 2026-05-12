@@ -76,8 +76,6 @@ class Chat(commands.Cog):
             settings = await self.settings_manager.get_settings(
                 guild.id
             )
-            if settings.get("brain_mode") != "llm":
-                continue
             if not settings.get("response_enabled"):
                 continue
 
@@ -179,9 +177,6 @@ class Chat(commands.Cog):
             settings = await self.settings_manager.get_settings(
                 guild.id
             )
-            if settings.get("brain_mode") != "llm":
-                continue
-
             target_channel = None
             allowed = settings.get("allowed_channels", [])
             if allowed:
@@ -258,11 +253,29 @@ class Chat(commands.Cog):
                 })
         return payload
 
+    def _is_duplicate(self, guild_id, text):
+        """Fuzzy dedup — only block if >70% word overlap with recent."""
+        if not text:
+            return False
+        words = set(text.lower().strip().split())
+        if len(words) < 3:
+            return False
+        recent = self.bot_recent_messages.get(guild_id, [])
+        for past in recent:
+            past_words = set(past.split())
+            if not past_words:
+                continue
+            overlap = len(words & past_words) / len(words)
+            if overlap > 0.70:
+                return True
+        return False
+
     def _record_response(self, guild_id, channel_id, content):
         """Track recent bot responses for deduplication."""
         recent = self.bot_recent_messages.get(guild_id, [])
         recent.append(content.lower().strip())
-        self.bot_recent_messages[guild_id] = recent[-20:]
+        # Keep only last 8 — smaller window avoids trapping on slow servers
+        self.bot_recent_messages[guild_id] = recent[-8:]
         self.channel_cooldowns[channel_id] = time.time()
         self.channel_counters[channel_id] = 0
         self.channel_message_goals[channel_id] = random.randint(4, 10)
@@ -312,9 +325,27 @@ class Chat(commands.Cog):
         )
 
         # --- IMAGE GENERATION TRIGGER ---
-        img_trigger = settings.get("image_trigger", "imagine").lower()
-        if settings.get("image_gen_enabled", True) and message.content.lower().startswith(img_trigger):
-            prompt_text = message.content[len(img_trigger):].strip()
+        img_trigger = settings.get(
+            "image_trigger", "imagine"
+        ).lower()
+        content_lower = message.content.lower().strip()
+        img_triggered = (
+            content_lower.startswith(img_trigger)
+            or content_lower.startswith(f"!{img_trigger}")
+            or content_lower.startswith(f"ultron {img_trigger}")
+        )
+        if settings.get("image_gen_enabled", True) and img_triggered:
+            # Strip trigger word (handle all variants)
+            prompt_text = None
+            for variant in [
+                f"!{img_trigger}",
+                f"ultron {img_trigger}",
+                img_trigger,
+            ]:
+                if content_lower.startswith(variant):
+                    prompt_text = message.content[
+                        len(variant):].strip()
+                    break
             if not prompt_text:
                 prompt_text = "something interesting"
             # Ultron-flavored wrapper
@@ -367,6 +398,7 @@ class Chat(commands.Cog):
         if channel_id not in self.channel_counters:
             self.channel_counters[channel_id] = 0
         self.channel_counters[channel_id] += 1
+        await self.db.increment_stat(guild_id, "messages_learned")
 
         if channel_id not in self.channel_message_goals:
             self.channel_message_goals[channel_id] = random.randint(4, 10)
@@ -424,6 +456,14 @@ class Chat(commands.Cog):
         # --- EXECUTE RESPONSE ---
         if not should_respond:
             return
+
+        trigger_type = "mention" if is_mentioned else (
+            "reply" if is_reply_to_bot else "auto"
+        )
+        print(
+            f"[{guild_id}] Triggered ({trigger_type}) "
+            f"in #{message.channel.name}"
+        )
 
         # Maybe react with emoji instead of replying
         if random.random() < settings["reaction_chance"]:
@@ -562,8 +602,9 @@ class Chat(commands.Cog):
                     llm_response = re.sub(
                         r'<@!?\d+>', '', llm_response
                     ).strip()
-                    # Dedup check
-                    if llm_response.lower().strip() in self.bot_recent_messages.get(guild_id, []):
+                    # Fuzzy dedup check
+                    if self._is_duplicate(guild_id, llm_response):
+                        print(f"[{guild_id}] Dedup blocked response")
                         llm_response = None
                     if llm_response:
                         base = sanitize_message(llm_response)
@@ -610,7 +651,13 @@ class Chat(commands.Cog):
                     await message.channel.send(
                         final_content, reference=reference
                     )
-                    await self.db.increment_stat(guild_id, "messages_sent")
+                    await self.db.increment_stat(
+                        guild_id, "messages_sent"
+                    )
+                    print(
+                        f"[{guild_id}] Responded in "
+                        f"#{message.channel.name}"
+                    )
                     self.last_bot_engagement[channel_id] = {
                         "time": time.time(),
                         "user_id": message.author.id

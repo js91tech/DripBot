@@ -24,12 +24,12 @@ def is_float(val):
 
 
 def is_valid_mode(val):
-    return val.lower() in ["markov", "llm"]
+    return val.lower() == "llm"
 
 
 # --- DEFAULTS ---
 DEFAULTS = {
-    "brain_mode": "llm",
+    "brain_mode": "llm",  # markov is dead, always llm
     "response_enabled": True,
     "cooldown_seconds": 10,
     "ignored_channels": [],

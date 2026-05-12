@@ -84,7 +84,10 @@ async def generate_image(prompt, model_name=None):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.post(
+                url, headers=headers, json=data,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
                 if resp.status == 200:
                     result = await resp.json()
                     images = result.get("data", [])
@@ -92,7 +95,12 @@ async def generate_image(prompt, model_name=None):
                         img_url = images[0].get("url")
                         if img_url:
                             # Download the image bytes
-                            async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=30)) as img_resp:
+                            async with session.get(
+                                img_url,
+                                timeout=aiohttp.ClientTimeout(
+                                    total=30
+                                )
+                            ) as img_resp:
                                 if img_resp.status == 200:
                                     return await img_resp.read()
                                 else:
