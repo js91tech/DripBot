@@ -10,6 +10,7 @@ import asyncio
 # ==========================================
 bot_instance = None
 bot_loop = None
+bot_ready = False
 
 app = FastAPI(title="Discord Bot Dashboard", docs_url=None, redoc_url=None)
 
@@ -19,7 +20,7 @@ app = FastAPI(title="Discord Bot Dashboard", docs_url=None, redoc_url=None)
 # ==========================================
 def _run_async(coro):
     """Run an async coroutine from the bot's event loop."""
-    if not bot_loop:
+    if not bot_loop or not bot_ready:
         raise HTTPException(503, "Bot not ready yet")
     future = asyncio.run_coroutine_threadsafe(coro, bot_loop)
     return asyncio.wrap_future(future)
@@ -35,6 +36,18 @@ class SettingsUpdate(BaseModel):
 class MemoryAdd(BaseModel):
     user_id: int
     note: str
+
+
+# ==========================================
+# HEALTH CHECK — Render needs this
+# ==========================================
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok" if bot_ready else "starting",
+        "ready": bot_ready,
+        "guilds": len(bot_instance.guilds) if bot_instance and bot_ready else 0
+    }
 
 
 # ==========================================
@@ -60,8 +73,8 @@ async def dashboard():
 # ==========================================
 @app.get("/api/guilds")
 async def list_guilds():
-    if not bot_instance:
-        raise HTTPException(503, "Bot not ready")
+    if not bot_instance or not bot_ready:
+        raise HTTPException(503, "Bot not ready yet")
     return [
         {"id": g.id, "name": g.name}
         for g in bot_instance.guilds
@@ -70,8 +83,8 @@ async def list_guilds():
 
 @app.get("/api/guilds/{guild_id}/channels")
 async def list_channels(guild_id: int):
-    if not bot_instance:
-        raise HTTPException(503, "Bot not ready")
+    if not bot_instance or not bot_ready:
+        raise HTTPException(503, "Bot not ready yet")
     guild = bot_instance.get_guild(guild_id)
     if not guild:
         raise HTTPException(404, "Guild not found")

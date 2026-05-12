@@ -444,9 +444,17 @@ const SETTINGS = [
     {
         category: "Brain & Model",
         keys: [
-            { key: "brain_mode", label: "Brain Mode", desc: "Response engine", type: "select", options: ["markov", "llm"] },
+            { key: "brain_mode", label: "Brain Mode", desc: "Response engine (markov auto-migrated to llm)", type: "select", options: ["llm"] },
             { key: "llm_model", label: "LLM Model", desc: "OpenRouter model ID", type: "text" },
             { key: "personality_prefix", label: "Personality Prefix", desc: "Text prepended to responses", type: "text" },
+        ]
+    },
+    {
+        category: "Image Generation",
+        keys: [
+            { key: "image_gen_enabled", label: "Image Gen Enabled", desc: "Allow image generation via trigger phrase", type: "toggle" },
+            { key: "image_trigger", label: "Trigger Phrase", desc: "Word that starts image gen (e.g. imagine)", type: "text" },
+            { key: "image_model", label: "Image Model", desc: "OpenRouter image model ID", type: "text" },
         ]
     },
     {
@@ -481,25 +489,35 @@ const CHATTINESS_LABELS = [
 ];
 
 // ==========================================
-// INIT
+// INIT — polls /api/health until bot is ready
 // ==========================================
 async function init() {
-    try {
-        const res = await fetch("/api/guilds");
-        const guilds = await res.json();
-        const sel = document.getElementById("guild-select");
-        guilds.forEach(g => {
-            const opt = document.createElement("option");
-            opt.value = g.id;
-            opt.textContent = g.name;
-            sel.appendChild(opt);
-        });
-        if (guilds.length > 0) {
-            selectGuild(guilds[0].id);
+    const sel = document.getElementById("guild-select");
+    for (let attempt = 0; attempt < 60; attempt++) {
+        try {
+            const res = await fetch("/api/guilds");
+            if (res.status === 503) {
+                // Bot still starting — wait and retry
+                await new Promise(r => setTimeout(r, 2000));
+                continue;
+            }
+            const guilds = await res.json();
+            guilds.forEach(g => {
+                const opt = document.createElement("option");
+                opt.value = g.id;
+                opt.textContent = g.name;
+                sel.appendChild(opt);
+            });
+            if (guilds.length > 0) {
+                selectGuild(guilds[0].id);
+            }
+            return; // success — stop polling
+        } catch (e) {
+            await new Promise(r => setTimeout(r, 2000));
         }
-    } catch (e) {
-        showToast("Could not connect to bot API", "error");
     }
+    // Exhausted retries
+    showToast("Bot is still starting. Refresh the page in a moment.", "error");
 }
 
 // ==========================================

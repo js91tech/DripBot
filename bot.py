@@ -74,10 +74,17 @@ class MarkovLLMBot(commands.Bot):
         await self.load_extension("cogs.chat")
         await self.load_extension("cogs.settings_cog")
 
+        # MIGRATION: auto-fix any markov-era settings
+        print("Running settings migration...")
+        await self.settings_manager.migrate_all_guilds()
+
     async def on_ready(self):
         """Runs when the bot successfully connects to Discord."""
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print("------")
+        # Signal the dashboard that the bot is fully online
+        api_module.bot_ready = True
+        print("Dashboard: bot ready flag set")
 
 # --- INITIALIZE AND RUN ---
 
@@ -86,10 +93,7 @@ bot = MarkovLLMBot()
 api_module.bot_instance = bot  # FIX: update the actual module-level variable
 
 print("Starting API dashboard thread...")
-if not os.environ.get("RENDER", ""):
-    threading.Thread(target=run_api, daemon=True).start()
-else:
-    print("Render detected — skipping dashboard (prevents restart loop)")
+threading.Thread(target=run_api, daemon=True).start()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:

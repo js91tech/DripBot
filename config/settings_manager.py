@@ -19,11 +19,49 @@ class SettingsManager:
                 # this ensures old servers get the new keys automatically instead of crashing.
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
+
+                # MIGRATION: force brain_mode to llm (markov is dead)
+                if full_settings.get("brain_mode") == "markov":
+                    full_settings["brain_mode"] = "llm"
+                    print(
+                        f"[{guild_id}] Migrated brain_mode "
+                        f"markov -> llm"
+                    )
+
                 self.cache[guild_id] = full_settings
+                # Persist the migration
+                await self.db.save_settings(
+                    guild_id, full_settings
+                )
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
-                await self.db.save_settings(guild_id, self.cache[guild_id])
+                await self.db.save_settings(
+                    guild_id, self.cache[guild_id]
+                )
         return self.cache[guild_id]
+
+    async def migrate_all_guilds(self):
+        """Sweep all known guilds and fix stale settings."""
+        cursor = await self.db.conn.execute(
+            "SELECT guild_id FROM settings"
+        )
+        rows = await cursor.fetchall()
+        fixed = 0
+        for (guild_id,) in rows:
+            settings = await self.get_settings(guild_id)
+            if settings.get("brain_mode") == "markov":
+                settings["brain_mode"] = "llm"
+                await self.db.save_settings(
+                    guild_id, settings
+                )
+                self.cache.pop(guild_id, None)
+                fixed += 1
+        if fixed:
+            print(
+                f"[MIGRATION] Fixed brain_mode for "
+                f"{fixed} guild(s)"
+            )
+        return fixed
 
     async def set_setting(self, guild_id, key, value):
         settings = await self.get_settings(guild_id)

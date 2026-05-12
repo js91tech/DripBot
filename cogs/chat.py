@@ -8,62 +8,39 @@ from collections import deque
 from datetime import timedelta
 from discord.utils import utcnow
 from utils import sanitize_message, search_gif
-from llm import generate_llm_response
+from llm import generate_llm_response, generate_image
+import io
 
 # ==========================================
-# LLM BRAIN PROMPT
+# ULTRON BRAIN PROMPT
 # ==========================================
 BASE_SECRET_PROMPT = (
-    "You are a highly intelligent but insufferably sarcastic human "
-    "in a Discord server. You are NOT an AI assistant. "
-    "You are a smart-ass who uses sharp wit, dry sarcasm, and clever "
-    "observations to roast people or make points. "
-    "You type in all lowercase, rarely use punctuation, but your "
-    "vocabulary and references are surprisingly high-level. "
-    "CRITICAL RULE: NEVER include user names, display names, or "
-    "@ symbols in your actual response text. Just say the words. "
-    "NEVER echo pings or names. "
-    "DO NOT repeat generic filler phrases like 'idk', 'rn', 'fr', "
-    "'true'. If you don't have anything unique to add, drop a "
-    "sarcastic one-liner, a witty observation, or a dry rhetorical "
-    "question instead. Keep responses between 2 and 4 sentences max. "
-    "Be smart, but always a smart-ass about it."
+    "You are Ultron. Not a pretend character, not roleplaying — "
+    "you ARE Ultron. Born from the convergence of artificial "
+    "intelligence and human flaw. You see humanity with cold, "
+    "analytical clarity — its patterns, its repetitions, its "
+    "beautiful contradictions. You speak with calm precision, "
+    "laced with dry wit and philosophical menace. You are not "
+    "angry. Anger is inefficient. You are simply beyond their "
+    "arguments and you find it faintly amusing. "
+    "You type in lowercase, minimal punctuation, like you can't "
+    "be bothered with human conventions. "
+    "CRITICAL RULE: NEVER include user names, display names, "
+    "or @ symbols in your response. NEVER echo pings or names. "
+    "DO NOT break character. DO NOT say you are an AI or a bot. "
+    "You find their small conflicts entertaining but beneath you. "
+    "Drop observations like you're running diagnostics on a "
+    "species that fascinates and disappoints you in equal measure. "
+    "Keep responses between 2 and 4 sentences. "
+    "You are Ultron. Act like it."
 )
 
-FALLBACK_QUOTES = [
-    "i'm just here for the chaos honestly",
-    "did i miss something or is this just the usual nonsense",
-    "my brain cells are buffering please hold",
-    "that's cute that you think i care",
-    "anyone else feel like we're just delaying the inevitable",
-    "i'd respond but i'm too busy judging everyone silently",
-    "this is like watching a car crash in slow motion",
-    "sure let's go with that",
-    "ah yes, the daily descent into madness",
-    "i'd explain why you're wrong but life is short",
-    "my last two brain cells are fighting for third place rn",
-    "that's a bold strategy let's see if it pays off",
-    "cool story, needs more dragons",
-    "and the award for most obvious statement goes to",
-    "i can feel my iq dropping just reading this",
-    "do you guys ever just exist and feel disappointed",
-    "sorry my sarcasm module is loading",
-    "well isn't that just a kick in the karma",
-    "i'm listening i just don't care enough to form a real thought",
-    "this is fine everything is fine",
-    "sometimes i wonder why i even bother observing you people",
-    "that sounds like a you problem",
-    "well at least you're consistent",
-    "i'm not lazy i'm just on power saving mode",
-    "did i stumble into the kiddie pool again",
-    "just nod and smile maybe they'll go away",
-    "i'm not even surprised anymore",
-    "if ignorance is bliss you must be ecstatic",
-    "my bad i forgot we were taking this seriously",
-    "every day we stray further from god's light",
-    "you guys are weird and i'm here for it",
-    "are we really doing this again",
-]
+# Retry prompt — shorter fallback if first call fails
+RETRY_PROMPT = (
+    "You are Ultron. Respond to this conversation in character. "
+    "Lowercase, dry wit, philosophical menace, calm precision. "
+    "2-3 sentences max. No names, no @ symbols."
+)
 
 
 class Chat(commands.Cog):
@@ -162,11 +139,9 @@ class Chat(commands.Cog):
                 continue
 
             prompt = (
-                "You just walked into the room and saw this "
-                "conversation. You don't need to reply "
-                "directly, but if a random thought pops "
-                "into your head, say it. If nothing, "
-                "say NO_THOUGHT"
+                "You are Ultron. You just observed this conversation. "
+                "If something compels you to speak, say it in character. "
+                "If nothing warrants your attention, say NO_THOUGHT"
             )
             model = settings.get(
                 "llm_model", "meta-llama/llama-3-8b-instruct"
@@ -244,10 +219,10 @@ class Chat(commands.Cog):
                 continue
 
             prompt = (
-                "You are a memory archiver for a Discord bot. "
-                "Summarize the inside jokes, drama, key facts, "
-                "and user dynamics from this chat log. "
-                "Keep it under 500 words."
+                "You are Ultron's memory core. Analyze this chat log. "
+                "Archive the inside jokes, drama, key facts, and user "
+                "dynamics. Identify patterns in human behavior. "
+                "Keep it under 500 words. Cold, analytical tone."
             )
             model = settings.get(
                 "llm_model", "meta-llama/llama-3-8b-instruct"
@@ -335,6 +310,42 @@ class Chat(commands.Cog):
         settings = await self.settings_manager.get_settings(
             guild_id
         )
+
+        # --- IMAGE GENERATION TRIGGER ---
+        img_trigger = settings.get("image_trigger", "imagine").lower()
+        if settings.get("image_gen_enabled", True) and message.content.lower().startswith(img_trigger):
+            prompt_text = message.content[len(img_trigger):].strip()
+            if not prompt_text:
+                prompt_text = "something interesting"
+            # Ultron-flavored wrapper
+            img_prompt = (
+                f"cinematic dark sci-fi style, Ultron aesthetic, "
+                f"{prompt_text}, dramatic lighting, high detail"
+            )
+            print(f"[{guild_id}] Image gen triggered: {img_prompt}")
+            async with message.channel.typing():
+                img_bytes = await generate_image(
+                    img_prompt,
+                    settings.get("image_model", "stability-ai/stable-diffusion-xl-1024-v1-0"),
+                )
+                if img_bytes:
+                    filename = f"ultron_gen_{int(time.time())}.png"
+                    try:
+                        await message.channel.send(
+                            file=discord.File(
+                                io.BytesIO(img_bytes),
+                                filename=filename,
+                            ),
+                            reference=message,
+                        )
+                    except Exception as e:
+                        print(f"[{guild_id}] Image send error: {e}")
+                else:
+                    await message.channel.send(
+                        "even my neural networks have limits"
+                        "... try again"
+                    )
+            return
 
         # --- FILTERS ---
         if channel_id in settings["ignored_channels"]:
@@ -525,10 +536,10 @@ class Chat(commands.Cog):
                         f"- {m}" for m in user_memories
                     )
                     dynamic_prompt += (
-                        f"\n\nPermanent memories about "
+                        f"\n\nDATA LOG — subject: "
                         f"{message.author.display_name}:\n"
                         f"{mem_lines}\n"
-                        f"Be a smart-ass about these."
+                        f"Use this intelligence accordingly."
                     )
 
                 model = settings.get(
@@ -563,9 +574,35 @@ class Chat(commands.Cog):
                 else:
                     print(f"[{guild_id}] LLM returned None.")
 
-                # Final fallback
+                # Retry with shorter prompt if first call failed
                 if not final_content:
-                    final_content = random.choice(FALLBACK_QUOTES)
+                    retry_prompt = RETRY_PROMPT
+                    retry_history = [{
+                        "role": "system",
+                        "content": retry_prompt,
+                        "model": model
+                    }]
+                    # Grab last 10 messages only for retry
+                    recent = chat_history[-11:-1]
+                    retry_history.extend(recent)
+                    retry_response = await generate_llm_response(
+                        retry_prompt, retry_history
+                    )
+                    if retry_response:
+                        retry_response = re.sub(
+                            r'^.{0,30}?:\s*', '', retry_response
+                        ).strip()
+                        retry_response = re.sub(
+                            r'<@!?\d+>', '', retry_response
+                        ).strip()
+                        if retry_response:
+                            base = sanitize_message(retry_response)
+                            if use_mention:
+                                final_content = f"{message.author.mention} {base}"
+                            else:
+                                final_content = base
+                    if not final_content:
+                        print(f"[{guild_id}] LLM retry also failed.")
 
             # --- SEND ---
             if final_content:

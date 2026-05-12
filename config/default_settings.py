@@ -47,6 +47,10 @@ DEFAULTS = {
     "personality_prefix": "",
     "llm_model": "meta-llama/llama-3-8b-instruct",
     "response_chance": 0.15,
+    # Image generation
+    "image_gen_enabled": True,
+    "image_trigger": "imagine",
+    "image_model": "stability-ai/stable-diffusion-xl-1024-v1-0",
 }
 
 VALIDATORS = {

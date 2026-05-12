@@ -270,13 +270,12 @@ class SettingsCog(commands.Cog):
             interaction.guild.id
         )
         roast_prompt = (
-            f"You are a ruthless, sarcastic smart-ass. "
-            f"Analyze these messages from "
-            f"{user.display_name} and deliver a "
-            f"devastating, witty roast. "
-            f"Keep it 2-4 sentences. Be savage but "
-            f"clever. DO NOT use @ symbols or names "
-            f"in your response."
+            f"You are Ultron. Analyze these messages from "
+            f"{user.display_name} and deliver a devastating "
+            f"assessment — cold, precise, philosophically cutting. "
+            f"Like running a diagnostic on a flawed organism. "
+            f"2-4 sentences. Be savage but clinical. "
+            f"DO NOT use @ symbols or names in your response."
         )
 
         history = [
