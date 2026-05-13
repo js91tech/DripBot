@@ -78,6 +78,22 @@ FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
 
 
+def _get_owner_user_id():
+    try:
+        return int(os.getenv("OWNER_USER_ID", "0"))
+    except ValueError:
+        print("[PUPPET] Invalid OWNER_USER_ID; puppet mode disabled")
+        return 0
+
+
+def _get_owner_target_channel_id():
+    try:
+        return int(os.getenv("OWNER_TARGET_CHANNEL_ID", "0"))
+    except ValueError:
+        print("[PUPPET] Invalid OWNER_TARGET_CHANNEL_ID; puppet mode disabled")
+        return 0
+
+
 class Chat(commands.Cog):
     def __init__(self, bot, db, settings_manager):
         self.bot = bot
@@ -334,19 +350,32 @@ class Chat(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if isinstance(message.channel, discord.DMChannel):
-            owner_id = int(os.getenv("OWNER_USER_ID", "0"))
-            if owner_id != 0 and message.author.id == owner_id and message.content:
-                target_channel_id = int(os.getenv("OWNER_TARGET_CHANNEL_ID", "0"))
-                if target_channel_id != 0:
-                    target_channel = self.bot.get_channel(target_channel_id)
-                    if target_channel:
-                        try:
-                            await target_channel.send(message.content)
-                            await message.author.send("Spoke in server.")
-                        except discord.errors.HTTPException as e:
-                            await message.author.send(f"Failed to send: {e}")
-                    else:
-                        await message.author.send("Target channel not found.")
+            if message.author.bot:
+                return
+
+            owner_id = _get_owner_user_id()
+            if owner_id == 0 or message.author.id != owner_id:
+                print(f"[PUPPET] Rejected DM from unauthorized user {message.author.id}")
+                return
+
+            if not message.content:
+                return
+
+            target_channel_id = _get_owner_target_channel_id()
+            if target_channel_id == 0:
+                await message.author.send("Puppet mode target channel is not configured.")
+                return
+
+            target_channel = self.bot.get_channel(target_channel_id)
+            if not target_channel:
+                await message.author.send("Target channel not found.")
+                return
+
+            try:
+                await target_channel.send(message.content)
+                await message.author.send("Spoke in server.")
+            except discord.errors.HTTPException as e:
+                await message.author.send(f"Failed to send: {e}")
             return
 
         if message.guild is None or message.author == self.bot.user:
