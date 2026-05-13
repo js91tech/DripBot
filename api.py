@@ -338,12 +338,103 @@ def create_api(bot_instance):
             logger.error(f"Settings update error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
+    # -- Presence / Status --
+    _VALID_STATUSES = {"online", "idle", "dnd", "invisible"}
+    _VALID_ACTIVITY_TYPES = {"playing", "watching", "listening", "streaming", "competing", "custom", "none"}
+
+    @app.get("/api/presence")
+    async def get_presence(guild_id: Optional[str] = Query(None)):
+        try:
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid = _resolve_guild_id(bot_instance, sm, guild_id)
+            s = sm.settings[gid]
+            return {
+                "status": s.get("presence_status", "online"),
+                "activity_type": s.get("presence_activity_type", "watching"),
+                "activity_text": s.get("presence_activity_text", ""),
+                "streaming_url": s.get("presence_streaming_url", ""),
+                "valid_statuses": sorted(_VALID_STATUSES),
+                "valid_activity_types": sorted(_VALID_ACTIVITY_TYPES),
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Presence get error: {e}", exc_info=True)
+            raise HTTPException(500, detail=str(e))
+
+    @app.post("/api/presence")
+    async def set_presence(request: Request):
+        try:
+            body = await request.json()
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid_param = body.get("guild_id")
+            gid = _resolve_guild_id(bot_instance, sm, gid_param)
+            settings = sm.settings[gid]
+
+            status = body.get("status")
+            if status is not None:
+                if status not in _VALID_STATUSES:
+                    raise HTTPException(400, detail=f"Invalid status. Must be one of {sorted(_VALID_STATUSES)}")
+                settings["presence_status"] = status
+
+            a_type = body.get("activity_type")
+            if a_type is not None:
+                if a_type not in _VALID_ACTIVITY_TYPES:
+                    raise HTTPException(400, detail=f"Invalid activity_type. Must be one of {sorted(_VALID_ACTIVITY_TYPES)}")
+                settings["presence_activity_type"] = a_type
+
+            a_text = body.get("activity_text")
+            if a_text is not None:
+                settings["presence_activity_text"] = str(a_text)
+
+            stream_url = body.get("streaming_url")
+            if stream_url is not None:
+                settings["presence_streaming_url"] = str(stream_url)
+
+            await sm.save_settings(gid)
+
+            # Push the change to Discord on the bot's event loop, if available.
+            applied = False
+            fn = getattr(bot_instance, "apply_presence", None)
+            if fn:
+                try:
+                    import asyncio as _asyncio
+                    future = _asyncio.run_coroutine_threadsafe(fn(int(gid)), bot_instance.loop)
+                    future.result(timeout=10)
+                    applied = True
+                except Exception as e:
+                    logger.warning(f"apply_presence failed from API: {e}")
+
+            return {
+                "success": True,
+                "applied": applied,
+                "presence": {
+                    "status": settings.get("presence_status"),
+                    "activity_type": settings.get("presence_activity_type"),
+                    "activity_text": settings.get("presence_activity_text"),
+                    "streaming_url": settings.get("presence_streaming_url"),
+                },
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Presence set error: {e}", exc_info=True)
+            raise HTTPException(500, detail=str(e))
+
     # -- Health --
     @app.get("/api/health")
     async def health():
+        is_ready = bool(getattr(bot_instance, "is_ready", lambda: False)())
+        is_closed = bool(getattr(bot_instance, "is_closed", lambda: True)())
         return {
-            "status": "online",
-            "guilds": len(bot_instance.guilds),
+            "status": "online" if (is_ready and not is_closed) else "starting",
+            "ready": is_ready,
+            "closed": is_closed,
+            "guilds": len(bot_instance.guilds) if hasattr(bot_instance, "guilds") else 0,
             "latency_ms": round(bot_instance.latency * 1000, 1) if hasattr(bot_instance, "latency") else 0,
         }
 

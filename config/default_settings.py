@@ -21,6 +21,12 @@ def is_float(val):
 def is_valid_mode(val):
     return val.lower() in ["markov", "llm"]
 
+def is_valid_presence_status(val):
+    return str(val).lower() in ["online", "idle", "dnd", "do_not_disturb", "invisible", "offline"]
+
+def is_valid_activity_type(val):
+    return str(val).lower() in ["playing", "watching", "listening", "streaming", "competing", "custom", "none"]
+
 # ==========================================
 # PERSONALITY PRESETS
 # ==========================================
@@ -169,6 +175,28 @@ DEFAULT_SETTINGS = {
     "personality_status": "Observing.",
     "personality": {},
 
+    # ── Presence / Status ──
+    # presence_status:  "online" | "idle" | "dnd" | "invisible"
+    # presence_activity_type: "playing" | "watching" | "listening" | "streaming" | "competing" | "custom" | "none"
+    # presence_activity_text: the text shown after "Playing/Watching/etc."
+    # presence_streaming_url: only used when activity_type == "streaming"
+    "presence_status": "online",
+    "presence_activity_type": "watching",
+    "presence_activity_text": "the chaos unfold",
+    "presence_streaming_url": "https://www.twitch.tv/discord",
+
+    # ── Typing indicator ──
+    # When True, the bot shows the Discord "typing..." indicator before sending
+    # a generated reply. typing_delay_seconds is a minimum visible duration so
+    # users actually see the indicator (capped at 5s).
+    "typing_indicator_enabled": True,
+    "typing_delay_seconds": 1.5,
+
+    # ── Always-online / keep-alive ──
+    # When True, the bot self-pings its dashboard health endpoint to prevent
+    # idle hosts (Render/Replit free tiers) from spinning the process down.
+    "keep_alive_enabled": True,
+
     # ── Z.ai Hybrid Integration ──
     "vision_enabled": True,
     "web_search_enabled": True,
@@ -222,4 +250,9 @@ VALIDATORS = {
     "proactive_enabled": is_bool,
     "auto_router_enabled": is_bool,
     "puppet_enabled": is_bool,
+    "presence_status": is_valid_presence_status,
+    "presence_activity_type": is_valid_activity_type,
+    "typing_indicator_enabled": is_bool,
+    "typing_delay_seconds": is_float,
+    "keep_alive_enabled": is_bool,
 }

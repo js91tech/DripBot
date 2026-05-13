@@ -245,6 +245,8 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="Vision (Z.ai)", value="vision_enabled"),
         app_commands.Choice(name="Web Search (Z.ai)", value="web_search_enabled"),
         app_commands.Choice(name="Z.ai Image Gen", value="zai_image_gen_enabled"),
+        app_commands.Choice(name="Typing Indicator", value="typing_indicator_enabled"),
+        app_commands.Choice(name="Keep-Alive Pings", value="keep_alive_enabled"),
     ])
     async def toggle_setting(self, interaction: discord.Interaction, setting: app_commands.Choice[str]):
         settings = await self.settings_manager.get_settings(interaction.guild.id)
@@ -274,6 +276,112 @@ class SettingsCog(commands.Cog):
             f"Chattiness set to **{level.name}**. Response chance is now {chance * 100}%",
             ephemeral=True,
         )
+
+    # ==========================================
+    # /botsettings status   — set online/idle/dnd/invisible
+    # /botsettings activity — set the "Playing/Watching/..." line
+    # /botsettings typing   — toggle the "typing..." indicator
+    # ==========================================
+    @group.command(name="status", description="Change the bot's online status")
+    @app_commands.describe(status="Online, Idle, Do Not Disturb, or Invisible")
+    @app_commands.choices(status=[
+        app_commands.Choice(name="Online", value="online"),
+        app_commands.Choice(name="Idle", value="idle"),
+        app_commands.Choice(name="Do Not Disturb", value="dnd"),
+        app_commands.Choice(name="Invisible", value="invisible"),
+    ])
+    async def status_cmd(self, interaction: discord.Interaction, status: app_commands.Choice[str]):
+        await self.settings_manager.set_setting(interaction.guild.id, "presence_status", status.value)
+        applied = await self._reapply_presence(interaction.guild.id)
+        suffix = "" if applied else " (settings saved, but presence couldn't be applied right now)"
+        await interaction.response.send_message(
+            f"Status set to **{status.name}**.{suffix}",
+            ephemeral=True,
+        )
+
+    @group.command(name="activity", description="Change the bot's activity (Playing/Watching/...)")
+    @app_commands.describe(
+        type="Activity type shown before the text",
+        text="The text shown after the activity type (e.g. 'with fire')",
+        streaming_url="(streaming only) Twitch/YouTube URL the bot links to",
+    )
+    @app_commands.choices(type=[
+        app_commands.Choice(name="Playing", value="playing"),
+        app_commands.Choice(name="Watching", value="watching"),
+        app_commands.Choice(name="Listening to", value="listening"),
+        app_commands.Choice(name="Streaming", value="streaming"),
+        app_commands.Choice(name="Competing in", value="competing"),
+        app_commands.Choice(name="Custom (just text)", value="custom"),
+        app_commands.Choice(name="None (clear activity)", value="none"),
+    ])
+    async def activity_cmd(
+        self,
+        interaction: discord.Interaction,
+        type: app_commands.Choice[str],
+        text: str = "",
+        streaming_url: str = "",
+    ):
+        updates = {"presence_activity_type": type.value}
+        if type.value == "none":
+            updates["presence_activity_text"] = ""
+        else:
+            if not text:
+                await interaction.response.send_message(
+                    "Please provide a `text` value (or pick **None** to clear).",
+                    ephemeral=True,
+                )
+                return
+            updates["presence_activity_text"] = text
+            if type.value == "streaming" and streaming_url:
+                updates["presence_streaming_url"] = streaming_url
+
+        await self.settings_manager.update_settings(interaction.guild.id, updates)
+        applied = await self._reapply_presence(interaction.guild.id)
+        if type.value == "none":
+            preview = "(no activity)"
+        elif type.value == "custom":
+            preview = text
+        else:
+            preview = f"{type.name} {text}"
+        suffix = "" if applied else " (settings saved, but presence couldn't be applied right now)"
+        await interaction.response.send_message(
+            f"Activity set to: **{preview}**{suffix}",
+            ephemeral=True,
+        )
+
+    @group.command(name="typing", description="Toggle or configure the 'typing...' indicator")
+    @app_commands.describe(
+        enabled="Whether to show typing... before replies",
+        delay_seconds="Minimum visible duration of the typing indicator (0-5s)",
+    )
+    async def typing_cmd(
+        self,
+        interaction: discord.Interaction,
+        enabled: bool = True,
+        delay_seconds: float = 1.5,
+    ):
+        delay_seconds = max(0.0, min(5.0, float(delay_seconds)))
+        await self.settings_manager.update_settings(interaction.guild.id, {
+            "typing_indicator_enabled": enabled,
+            "typing_delay_seconds": delay_seconds,
+        })
+        state = "ON" if enabled else "OFF"
+        await interaction.response.send_message(
+            f"Typing indicator is **{state}** (delay: `{delay_seconds}s`).",
+            ephemeral=True,
+        )
+
+    async def _reapply_presence(self, guild_id: int) -> bool:
+        """Re-apply the bot-wide presence from the latest settings. Returns
+        True on success, False if the bot doesn't expose `apply_presence`."""
+        fn = getattr(self.bot, "apply_presence", None)
+        if not fn:
+            return False
+        try:
+            await fn(guild_id)
+            return True
+        except Exception:
+            return False
 
     @group.command(name="mode", description="Switch between Markov and LLM")
     @app_commands.describe(brain="Select the brain mode")
