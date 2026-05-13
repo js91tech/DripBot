@@ -188,7 +188,7 @@ async def show_model(ctx):
     await ctx.send(f"Current model: `{model}`")
 
 
-@bot.command(name="imagine")
+@bot.command(name="imagine", aliases=["image", "img", "draw"])
 async def imagine(ctx, *, prompt: str = None):
     """Generate an image using Z.ai sidecar, Pollinations, or OpenRouter."""
     if not prompt:

@@ -140,6 +140,43 @@ class SettingsCog(commands.Cog):
         )
 
     # ==========================================
+    # /image — Slash command for image generation
+    # FIX v5.8: Users kept typing /image which didn't exist.
+    # Now it works just like !imagine but as a slash command.
+    # ==========================================
+    @app_commands.command(name="image", description="Generate an image from a text prompt")
+    @app_commands.describe(prompt="Describe the image you want to generate")
+    async def slash_image(self, interaction: discord.Interaction, prompt: str):
+        await interaction.response.defer(thinking=True)
+        from llm import generate_image
+
+        guild_id = interaction.guild.id if interaction.guild else 0
+        settings = await self.settings_manager.get_settings(guild_id)
+        image_model = settings.get("image_model", "zai-sidecar")
+
+        try:
+            image_url = await generate_image(prompt, model_name=image_model)
+            if image_url:
+                import base64
+                import io
+                if image_url.startswith("data:image/"):
+                    header, encoded = image_url.split(",", 1)
+                    ext = header.split("/")[1].split(";")[0]
+                    img_data = base64.b64decode(encoded)
+                    img_file = discord.File(io.BytesIO(img_data), f"image.{ext}")
+                    await interaction.followup.send(file=img_file)
+                else:
+                    await interaction.followup.send(image_url)
+            else:
+                await interaction.followup.send(
+                    "Image generation failed. The sidecar might not be running, or the model is unavailable.\n"
+                    "Try switching image model with `/botsettings imgmodel` — **Pollinations** always works for free.",
+                    ephemeral=True,
+                )
+        except Exception as e:
+            await interaction.followup.send(f"Image generation error: `{e}`", ephemeral=True)
+
+    # ==========================================
     # /botsettings imgmodel - Image model picker
     # ==========================================
     @group.command(name="imgmodel", description="Switch the image generation model")
