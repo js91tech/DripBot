@@ -126,7 +126,7 @@ PERSONALITY_PRESETS = {
     },
 }
 
-DEFAULTS = {
+DEFAULT_SETTINGS = {
     "brain_mode": "llm",
     "response_enabled": True,
     "learning_enabled": True,
@@ -147,7 +147,7 @@ DEFAULTS = {
     "random_mention_chance": 0.10,
     "gif_chance": 0.10,
     "personality_prefix": "",
-    "llm_model": "meta-llama/llama-3-8b-instruct",
+    "llm_model": "x-ai/grok-4.3",
     "response_chance": 0.15,
     "image_model": "zai-sidecar",
     "personality_prompt": "",
