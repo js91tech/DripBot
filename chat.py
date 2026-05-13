@@ -10,6 +10,7 @@ This cog handles only the personality management prefix commands.
 
 import logging
 from discord.ext import commands
+from config.default_settings import build_personality_settings_update, normalize_personality_preset
 
 logger = logging.getLogger("dripsletongue.cog.chat")
 
@@ -118,7 +119,8 @@ class ChatCog(commands.Cog):
 
     def _get_personality_preset(self, name: str):
         """Look up a personality preset by name. Returns dict or None."""
-        return PERSONALITY_PRESETS.get(name.lower())
+        preset_id = normalize_personality_preset(name)
+        return PERSONALITY_PRESETS.get(preset_id) if preset_id else None
 
     @commands.command(name="presets")
     async def list_presets(self, ctx):
@@ -158,22 +160,13 @@ class ChatCog(commands.Cog):
             return
 
         # Set personality
-        name_lower = name.lower().strip()
-        preset = self._get_personality_preset(name_lower)
+        preset_id = normalize_personality_preset(name)
+        preset = PERSONALITY_PRESETS.get(preset_id) if preset_id else None
         if not preset:
             await ctx.send(f"Unknown preset: `{name}`.\nUse `!presets` to see available options.")
             return
 
-        # FIX: Set both flat keys (used by cogs) and nested key (used by dashboard API)
-        await sm.update_settings(guild_id, {
-            "personality_prompt": preset["prompt"],
-            "personality_name": preset["name"],
-            "personality": {
-                "preset": name_lower,
-                "custom": "",
-                "system_prompt": preset["prompt"],
-            },
-        })
+        await sm.update_settings(guild_id, build_personality_settings_update(preset_id))
 
         await ctx.send(f"Personality set to **{preset['name']}**!")
 

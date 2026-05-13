@@ -18,13 +18,17 @@ All per-guild endpoints accept ?guild_id=xxx query parameter.
 If not provided, uses the first guild (backward compatible).
 """
 
+import asyncio
 import logging
 import os
 from typing import Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from config.default_settings import PERSONALITY_PRESETS, DEFAULTS
+from config.default_settings import (
+    build_personality_settings_update,
+    normalize_personality_preset,
+)
 
 logger = logging.getLogger("dripsletongue.api")
 
@@ -77,12 +81,33 @@ def _get_settings_manager(bot_instance):
     return sm, None
 
 
-def _resolve_guild_id(bot_instance, sm, guild_id: Optional[str] = None) -> str:
-    """Resolve which guild_id to use. Returns gid string."""
-    if guild_id and guild_id in sm.settings:
-        return guild_id
-    # Fallback to first available guild
-    return list(sm.settings.keys())[0]
+def _resolve_guild_id(bot_instance, sm, guild_id: Optional[str] = None):
+    """Resolve which guild_id to use, preserving the cache key's int/string type."""
+    if not sm.settings:
+        raise HTTPException(503, detail="No guilds loaded yet -- bot may still be starting")
+
+    if guild_id:
+        candidates = [guild_id, str(guild_id)]
+        try:
+            candidates.append(int(guild_id))
+        except (TypeError, ValueError):
+            pass
+        for candidate in candidates:
+            if candidate in sm.settings:
+                return candidate
+
+    # Prefer the first bot guild order when possible, then fall back to cache order.
+    for guild in getattr(bot_instance, "guilds", []):
+        if guild.id in sm.settings:
+            return guild.id
+        if str(guild.id) in sm.settings:
+            return str(guild.id)
+    return next(iter(sm.settings.keys()))
+
+
+def _get_activity_name(bot_instance) -> str:
+    activity = getattr(bot_instance, "activity", None)
+    return getattr(activity, "name", "") or ""
 
 
 def create_api(bot_instance):
@@ -121,7 +146,7 @@ def create_api(bot_instance):
 
     # -- Profile --
     @app.get("/api/profile")
-    async def get_profile():
+    async def get_profile(guild_id: Optional[str] = Query(None)):
         try:
             user = bot_instance.user
             avatar_url = (
@@ -129,54 +154,99 @@ def create_api(bot_instance):
                 if user.avatar
                 else f"https://cdn.discordapp.com/embed/avatars/{int(str(user.discriminator)[-1])}.png"
             )
+            status_text = _get_activity_name(bot_instance)
+            sm = getattr(bot_instance, "settings_manager", None)
+            if sm and sm.settings:
+                gid = _resolve_guild_id(bot_instance, sm, guild_id)
+                status_text = sm.settings[gid].get("personality_status", status_text)
             return {
                 "username": str(user),
                 "id": str(user.id),
                 "avatar_url": avatar_url,
                 "guilds": len(bot_instance.guilds),
+                "status_text": status_text,
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Profile error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
     @app.post("/api/profile")
-    async def update_profile(avatar: Optional[UploadFile] = File(None)):
+    async def update_profile(
+        avatar: Optional[UploadFile] = File(None),
+        status: Optional[str] = Form(None),
+        guild_id: Optional[str] = Form(None),
+    ):
         try:
-            if avatar is None:
-                raise HTTPException(400, detail="No avatar file provided")
-            contents = await avatar.read()
-            if not contents:
-                raise HTTPException(400, detail="Empty file")
-            if len(contents) > 512 * 1024:
-                raise HTTPException(400, detail="Image must be under 512KB")
+            if avatar is None and status is None:
+                raise HTTPException(400, detail="No avatar or status provided")
 
             # discord.py runs on the bot's event loop, but uvicorn is in a
             # separate thread. Use run_coroutine_threadsafe to bridge them.
-            import asyncio
             loop = bot_instance.loop
+            result = {"success": True}
 
-            try:
-                future = asyncio.run_coroutine_threadsafe(
-                    bot_instance.user.edit(avatar=contents), loop
-                )
-                future.result(timeout=15)
-            except Exception as discord_err:
-                logger.error(f"Discord avatar update failed: {discord_err}", exc_info=True)
-                raise HTTPException(500, detail=f"Discord rejected avatar: {discord_err}")
+            if avatar is not None:
+                contents = await avatar.read()
+                if not contents:
+                    raise HTTPException(400, detail="Empty file")
+                if len(contents) > 512 * 1024:
+                    raise HTTPException(400, detail="Image must be under 512KB")
 
-            # Refresh user object to get new avatar hash
-            try:
-                future = asyncio.run_coroutine_threadsafe(
-                    bot_instance.user.fetch(), loop
-                )
-                future.result(timeout=10)
-            except Exception:
-                pass  # Non-critical -- avatar was already uploaded
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        bot_instance.user.edit(avatar=contents), loop
+                    )
+                    future.result(timeout=15)
+                except Exception as discord_err:
+                    logger.error(f"Discord avatar update failed: {discord_err}", exc_info=True)
+                    raise HTTPException(500, detail=f"Discord rejected avatar: {discord_err}")
 
-            avatar_url = ""
-            if bot_instance.user.avatar:
-                avatar_url = f"https://cdn.discordapp.com/avatars/{bot_instance.user.id}/{bot_instance.user.avatar}.png?size=256"
-            return {"success": True, "avatar_url": avatar_url}
+                # Refresh user object to get new avatar hash
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        bot_instance.user.fetch(), loop
+                    )
+                    future.result(timeout=10)
+                except Exception:
+                    pass  # Non-critical -- avatar was already uploaded
+
+                avatar_url = ""
+                if bot_instance.user.avatar:
+                    avatar_url = f"https://cdn.discordapp.com/avatars/{bot_instance.user.id}/{bot_instance.user.avatar}.png?size=256"
+                result["avatar_url"] = avatar_url
+
+            if status is not None:
+                clean_status = status.strip()
+                if len(clean_status) > 128:
+                    raise HTTPException(400, detail="Status must be 128 characters or fewer")
+
+                try:
+                    import discord
+
+                    activity = discord.Game(name=clean_status) if clean_status else None
+                    future = asyncio.run_coroutine_threadsafe(
+                        bot_instance.change_presence(activity=activity), loop
+                    )
+                    future.result(timeout=15)
+                except Exception as discord_err:
+                    logger.error(f"Discord status update failed: {discord_err}", exc_info=True)
+                    raise HTTPException(500, detail=f"Discord rejected status: {discord_err}")
+
+                sm = getattr(bot_instance, "settings_manager", None)
+                if sm and sm.settings:
+                    if guild_id:
+                        gid = _resolve_guild_id(bot_instance, sm, guild_id)
+                        sm.settings[gid]["personality_status"] = clean_status
+                        await sm.save_settings(gid)
+                    else:
+                        for gid in sm.settings:
+                            sm.settings[gid]["personality_status"] = clean_status
+                            await sm.save_settings(gid)
+                result["status_text"] = clean_status
+
+            return result
         except HTTPException:
             raise
         except Exception as e:
@@ -220,14 +290,10 @@ def create_api(bot_instance):
             custom_prompt = body.get("custom")
 
             if preset_name:
-                if preset_name not in PERSONALITY_PRESETS:
+                preset_id = normalize_personality_preset(preset_name)
+                if not preset_id:
                     raise HTTPException(400, detail=f"Unknown preset: {preset_name}")
-                settings["personality"]["preset"] = preset_name
-                settings["personality"]["custom"] = ""
-                settings["personality"]["system_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
-                # Also set the flat key used by cogs/chat.py on_message handler
-                settings["personality_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
-                settings["personality_name"] = PERSONALITY_PRESETS[preset_name]["name"]
+                settings.update(build_personality_settings_update(preset_id))
             elif custom_prompt:
                 settings["personality"]["preset"] = ""
                 settings["personality"]["custom"] = custom_prompt
@@ -343,6 +409,7 @@ def create_api(bot_instance):
     async def health():
         return {
             "status": "online",
+            "status_text": _get_activity_name(bot_instance),
             "guilds": len(bot_instance.guilds),
             "latency_ms": round(bot_instance.latency * 1000, 1) if hasattr(bot_instance, "latency") else 0,
         }

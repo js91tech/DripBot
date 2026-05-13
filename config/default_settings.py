@@ -127,6 +127,50 @@ PERSONALITY_PRESETS = {
     },
 }
 
+PERSONALITY_ALIASES = {
+    "tony": "tony_stark",
+    "tony_stark": "tony_stark",
+    "tonystark": "tony_stark",
+    "rick": "rick_sanchez",
+    "rick_sanchez": "rick_sanchez",
+    "ricksanchez": "rick_sanchez",
+    "brain": "the_brain",
+    "the_brain": "the_brain",
+    "thebrain": "the_brain",
+    "jarvis": "jarvis",
+    "j_a_r_v_i_s": "jarvis",
+}
+
+
+def normalize_personality_preset(value):
+    """Return a canonical personality preset ID, accepting old UI aliases."""
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    normalized = normalized.replace("-", "_").replace(" ", "_")
+    normalized = normalized.replace(".", "").replace("'", "")
+    if normalized in PERSONALITY_PRESETS:
+        return normalized
+    return PERSONALITY_ALIASES.get(normalized)
+
+
+def build_personality_settings_update(preset_id):
+    """Build the nested and flat settings required by all personality consumers."""
+    canonical_id = normalize_personality_preset(preset_id)
+    if not canonical_id:
+        return None
+    preset = PERSONALITY_PRESETS[canonical_id]
+    return {
+        "personality_prompt": preset["prompt"],
+        "personality_name": preset["name"],
+        "personality": {
+            "preset": canonical_id,
+            "custom": "",
+            "system_prompt": preset["prompt"],
+        },
+    }
+
+
 DEFAULT_SETTINGS = {
     # ── Core ──
     "brain_mode": "llm",

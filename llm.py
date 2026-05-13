@@ -425,6 +425,7 @@ async def parse_settings_command(prompt: str):
         "- vision_enabled: boolean\n"
         "- web_search_enabled: boolean\n"
         "- image_model: string (\"zai-sidecar\", \"pollinations\", or a model ID)\n"
+        "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\")\n"
         "- response_chance: float (0.0 to 1.0)\n"
         "- personality_prefix: string\n"
         "- markov_order: integer\n"
@@ -441,6 +442,7 @@ async def parse_settings_command(prompt: str):
         "- \"turn off responses\" → {\"key\": \"response_enabled\", \"value\": false}\n"
         "- \"set cooldown to 15\" → {\"key\": \"cooldown_seconds\", \"value\": 15}\n"
         "- \"switch to markov mode\" → {\"key\": \"brain_mode\", \"value\": \"markov\"}\n"
+        "- \"switch personality to deadpool\" → {\"key\": \"personality\", \"value\": \"deadpool\"}\n"
     )
 
     result = await _llm_handler.chat(

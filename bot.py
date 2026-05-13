@@ -113,8 +113,18 @@ async def on_ready():
     await db.init()
 
     # Pre-load settings for all guilds
+    saved_status = ""
     for guild in bot.guilds:
-        await settings_manager.get_settings(guild.id)
+        settings = await settings_manager.get_settings(guild.id)
+        if not saved_status:
+            saved_status = settings.get("personality_status", "")
+
+    if saved_status:
+        try:
+            await bot.change_presence(activity=discord.Game(name=saved_status))
+            logger.info(f"Applied saved bot status: {saved_status}")
+        except Exception as e:
+            logger.warning(f"Failed to apply saved bot status: {e}")
 
     # ── Load cogs ──
     cog_load_errors = []
