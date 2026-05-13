@@ -1,12 +1,16 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from config.default_settings import DEFAULTS, VALIDATORS, PERSONALITY_PRESETS
+from config.default_settings import (
+    DEFAULTS,
+    VALIDATORS,
+    build_personality_settings_update,
+    normalize_personality_preset,
+)
 from engine.markov import MarkovChain
 from utils import sanitize_message
 from llm import generate_llm_response, parse_settings_command
 import json
-import os
 
 
 class SettingsCog(commands.Cog):
@@ -40,9 +44,21 @@ class SettingsCog(commands.Cog):
             )
             return
         key, value = result
+        if key in {"personality", "personality_preset"}:
+            preset_id = normalize_personality_preset(value)
+            update_data = build_personality_settings_update(preset_id)
+            if not update_data:
+                await interaction.followup.send(f"Unknown personality preset: `{value}`", ephemeral=True)
+                return
+            await self.settings_manager.update_settings(interaction.guild.id, update_data)
+            await interaction.followup.send(
+                f"Personality switched to **{update_data['personality_name']}**",
+                ephemeral=True,
+            )
+            return
         guild_id = interaction.guild.id
         try:
-            settings = await self.settings_manager.set_setting(guild_id, key, value)
+            await self.settings_manager.set_setting(guild_id, key, value)
             await interaction.followup.send(f"Updated `{key}` to `{value}`", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Failed to update setting: {e}", ephemeral=True)
@@ -63,21 +79,29 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="The Brain (Megalomaniac)", value="the_brain"),
     ])
     async def personality_switch(self, interaction: discord.Interaction, preset: app_commands.Choice[str]):
-        preset_data = PERSONALITY_PRESETS.get(preset.value)
-        if not preset_data:
+        update_data = build_personality_settings_update(preset.value)
+        if not update_data:
             await interaction.response.send_message("Unknown preset.", ephemeral=True)
             return
-        await self.settings_manager.update_settings(interaction.guild.id, {
-            "personality_prompt": preset_data["prompt"],
-            "personality_name": preset_data.get("name", preset.value),
-            "personality": {
-                "preset": preset.value,
-                "custom": "",
-                "system_prompt": preset_data["prompt"],
-            },
-        })
+        await self.settings_manager.update_settings(interaction.guild.id, update_data)
         await interaction.response.send_message(
-            f"Personality switched to **{preset_data['name']}**!",
+            f"Personality switched to **{update_data['personality_name']}**!",
+            ephemeral=True,
+        )
+
+    @group.command(name="status", description="Update the bot's Discord activity status")
+    @app_commands.describe(text="Status/activity text to show on the bot profile")
+    async def status_switch(self, interaction: discord.Interaction, text: str):
+        clean_text = text.strip()
+        if len(clean_text) > 128:
+            await interaction.response.send_message("Status must be 128 characters or fewer.", ephemeral=True)
+            return
+        activity = discord.Game(name=clean_text) if clean_text else None
+        await self.bot.change_presence(activity=activity)
+        for guild in self.bot.guilds:
+            await self.settings_manager.set_setting(guild.id, "personality_status", clean_text)
+        await interaction.response.send_message(
+            f"Bot status updated to `{clean_text}`." if clean_text else "Bot status cleared.",
             ephemeral=True,
         )
 

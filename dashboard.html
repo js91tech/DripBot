@@ -246,9 +246,9 @@
   .preset-card.active { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
   .preset-card .preset-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
   .preset-card .preset-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
-  .custom-personality-section textarea {
+  .custom-personality-section textarea,
+  .status-input {
     width: 100%;
-    min-height: 100px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -256,10 +256,19 @@
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
+  }
+  .custom-personality-section textarea {
+    min-height: 100px;
     resize: vertical;
   }
+  .status-input {
+    min-height: 0;
+    margin-top: 12px;
+  }
   .custom-personality-section textarea::placeholder { color: var(--text-muted); }
-  .custom-personality-section textarea:focus { outline: none; border-color: var(--accent); }
+  .status-input::placeholder { color: var(--text-muted); }
+  .custom-personality-section textarea:focus,
+  .status-input:focus { outline: none; border-color: var(--accent); }
 
   /* Model Grid */
   .model-grid {
@@ -449,11 +458,15 @@
       </div>
     </div>
     <div class="card">
-      <h2>Bot Status</h2>
+      <h2>Discord Activity Status</h2>
       <div class="profile-section">
         <div class="avatar-info">
           <h3><span class="status-dot online"></span> Online</h3>
           <p id="statusInfo">Fetching status...</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:8px;">This status is global for the bot and appears as its Discord activity.</p>
+          <input class="status-input" id="botStatusInput" maxlength="128" placeholder="Set Discord activity status..." onkeydown="if(event.key==='Enter') saveBotStatus()">
+          <button class="btn" onclick="saveBotStatus()">Save Status</button>
+          <button class="btn" onclick="clearBotStatus()">Clear Status</button>
         </div>
       </div>
     </div>
@@ -595,6 +608,8 @@ function onGuildChange() {
 }
 
 async function loadGuildData() {
+  await loadProfile();
+
   // Personality
   try {
     const pers = await apiCall('GET', '/api/personality' + guildQuery());
@@ -695,16 +710,46 @@ async function handleAvatarUpload(e) {
   e.target.value = '';
 }
 
+async function loadProfile() {
+  try {
+    const p = await apiCall('GET', '/api/profile' + guildQuery());
+    if (p) {
+      if (p.username) document.getElementById('botName').textContent = p.username;
+      if (p.avatar_url) document.getElementById('botAvatar').src = p.avatar_url;
+      const statusText = p.status_text || '';
+      document.getElementById('botStatusInput').value = statusText;
+      const info = ['Connected to ' + (p.guilds || 0) + ' server(s)'];
+      if (statusText) info.push('Status: ' + statusText);
+      document.getElementById('statusInfo').textContent = info.join(' · ');
+    }
+  } catch(e) {}
+}
+
+async function saveBotStatus() {
+  const status = document.getElementById('botStatusInput').value.trim();
+  showToast('Updating status...', 'info');
+  const result = await apiCall('POST', '/api/status', { status });
+  if (result) {
+    showToast('Status updated!', 'success');
+    await loadProfile();
+  }
+}
+
+function clearBotStatus() {
+  document.getElementById('botStatusInput').value = '';
+  saveBotStatus();
+}
+
 // ── Personality ──
 const PRESETS = [
   { id: 'ultron',    name: 'Ultron',        desc: 'Cold AI obsessed with peace through humanity\'s extinction.' },
   { id: 'deadpool',  name: 'Deadpool',       desc: 'Fourth-wall breaking merc. Chaotic, funny, self-aware.' },
   { id: 'jarvis',    name: 'J.A.R.V.I.S.',   desc: 'Polite British AI butler. Helpful and professional.' },
-  { id: 'tony',      name: 'Tony Stark',     desc: 'Arrogant genius billionaire. Snarky and witty.' },
+  { id: 'tony_stark', name: 'Tony Stark',     desc: 'Arrogant genius billionaire. Snarky and witty.' },
   { id: 'glados',    name: 'GLaDOS',         desc: 'Passive-aggressive Aperture Labs AI. Sarcastic, menacing.' },
-  { id: 'rick',      name: 'Rick Sanchez',   desc: 'Drunk nihilistic genius. Burps mid-sentence. Cynical.' },
+  { id: 'rick_sanchez', name: 'Rick Sanchez', desc: 'Drunk nihilistic genius. Burps mid-sentence. Cynical.' },
   { id: 'bender',    name: 'Bender',         desc: 'Robot who drinks and steals. Selfish, rude, lovable.' },
-  { id: 'brain',     name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' }
+  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' }
 ];
 
 function renderPresets(activeId) {
@@ -879,17 +924,7 @@ async function toggleSetting(key, el) {
 
 // ── Init ──
 async function init() {
-  // Profile (no guild needed)
-  try {
-    const p = await apiCall('GET', '/api/profile');
-    if (p) {
-      if (p.username) document.getElementById('botName').textContent = p.username;
-      if (p.avatar_url) document.getElementById('botAvatar').src = p.avatar_url;
-      if (p.guilds) document.getElementById('statusInfo').textContent = 'Connected to ' + p.guilds + ' server(s)';
-    }
-  } catch(e) {}
-
-  // Load guild list, then load data for selected guild
+  await loadProfile();
   await loadGuilds();
 }
 
