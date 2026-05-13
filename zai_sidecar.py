@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import base64
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logger = logging.getLogger("zai_sidecar")
@@ -72,6 +73,7 @@ def run_cli(args, timeout=60):
     """Run a z-ai CLI command and return parsed JSON output."""
     try:
         cmd = ["z-ai"] + args
+        logger.info(f"Running CLI: {' '.join(cmd[:4])}...")
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -82,10 +84,14 @@ def run_cli(args, timeout=60):
             logger.error(f"CLI error (exit {result.returncode}): {result.stderr[:300]}")
             return None
 
+        # Log stdout for debugging (first 500 chars)
+        stdout_preview = result.stdout[:500].replace('\n', '\\n')
+        logger.debug(f"CLI stdout preview: {stdout_preview}")
+
         # Try to extract JSON from mixed emoji+JSON output
         parsed = _extract_json(result.stdout)
         if parsed is None:
-            logger.error(f"No valid JSON in CLI output: {result.stdout[:200]}")
+            logger.error(f"No valid JSON in CLI output. stdout={result.stdout[:300]}")
             return None
 
         return parsed
@@ -151,25 +157,36 @@ def handle_generate(data):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             tmp_path = f.name
 
+        logger.info(f"[GENERATE] prompt=\"{prompt[:80]}\", size={size}, output={tmp_path}")
         result = subprocess.run(
             ["z-ai", "image", "-p", prompt, "-o", tmp_path, "-s", size],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            logger.error(f"Image gen CLI error: {result.stderr[:300]}")
-            return {"error": "Image generation failed", "stderr": result.stderr[:300]}
+            stderr_preview = result.stderr[:300] if result.stderr else "(empty)"
+            stdout_preview = result.stdout[:200] if result.stdout else "(empty)"
+            logger.error(f"[GENERATE] CLI error (exit {result.returncode}): stderr={stderr_preview}")
+            logger.error(f"[GENERATE] CLI stdout: {stdout_preview}")
+            return {"error": "Image generation failed", "stderr": stderr_preview}
+
         if not os.path.exists(tmp_path):
+            logger.error(f"[GENERATE] No output file at {tmp_path}")
             return {"error": "Image generation failed — no output file"}
-        if os.path.getsize(tmp_path) < 1000:
+        file_size = os.path.getsize(tmp_path)
+        if file_size < 1000:
             os.unlink(tmp_path)
+            logger.error(f"[GENERATE] Output file too small: {file_size} bytes")
             return {"error": "Image generation failed — output file too small"}
 
+        logger.info(f"[GENERATE] Success! File size: {file_size} bytes")
         with open(tmp_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return {"image_b64": b64, "format": "png"}
     except subprocess.TimeoutExpired:
+        logger.error("[GENERATE] Timed out after 120s")
         return {"error": "Image generation timed out"}
     except Exception as e:
+        logger.error(f"[GENERATE] Exception: {e}")
         return {"error": str(e)}
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -263,11 +280,16 @@ def main():
 
     # Verify z-ai CLI
     try:
-        subprocess.run(["z-ai", "--help"], capture_output=True, timeout=10, check=True)
-        logger.info("z-ai CLI found and working")
+        result = subprocess.run(["z-ai", "--help"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            logger.info("z-ai CLI found and working")
+        else:
+            logger.warning(f"z-ai CLI returned exit code {result.returncode}: {result.stderr[:200]}")
+    except FileNotFoundError:
+        logger.error("z-ai CLI not found! Sidecar endpoints will return errors.")
+        logger.error("Install z-ai CLI to enable vision, image gen, and web search features.")
     except Exception as e:
-        logger.error(f"z-ai CLI not available: {e}")
-        logger.error("Sidecar endpoints will return errors until z-ai is installed.")
+        logger.error(f"z-ai CLI check failed: {e}")
 
     server = HTTPServer(("127.0.0.1", PORT), SidecarHandler)
     try:

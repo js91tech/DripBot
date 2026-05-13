@@ -240,6 +240,8 @@ class LLMHandler:
             result = await self._sidecar_post("/vision", data, timeout=90)
             if result and "content" in result:
                 return result["content"]
+            elif result and "error" in result:
+                logger.error(f"Sidecar vision error: {result['error']}")
             return ""
         except Exception as e:
             logger.error(f"Image analysis failed: {e}")
@@ -250,12 +252,19 @@ class LLMHandler:
     async def generate_image_sidecar(self, prompt: str, size: str = "1024x1024") -> str:
         """Generate an image via Z.ai sidecar. Returns base64 PNG or empty string."""
         try:
+            logger.info(f"[SIDECAR] Generating image: prompt=\"{prompt[:80]}\", size={size}")
             result = await self._sidecar_post("/generate", {"prompt": prompt, "size": size}, timeout=120)
             if result and "image_b64" in result:
+                b64_len = len(result["image_b64"])
+                logger.info(f"[SIDECAR] Image generated successfully (base64 len: {b64_len})")
                 return result["image_b64"]
+            elif result and "error" in result:
+                logger.error(f"[SIDECAR] Image gen error: {result['error']}")
+            else:
+                logger.error(f"[SIDECAR] Image gen returned unexpected response: {str(result)[:200]}")
             return ""
         except Exception as e:
-            logger.error(f"Sidecar image generation failed: {e}")
+            logger.error(f"[SIDECAR] Image generation exception: {e}")
             return ""
 
     # ── Z.ai Sidecar: Web Search ──
@@ -266,6 +275,8 @@ class LLMHandler:
             result = await self._sidecar_post("/search", {"query": query, "num": num}, timeout=30)
             if result and "results" in result:
                 return result["results"]
+            elif result and "error" in result:
+                logger.error(f"[SIDECAR] Search error: {result['error']}")
             return []
         except Exception as e:
             logger.error(f"Web search failed: {e}")
@@ -328,6 +339,8 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
       - "pollinations"   → Pollinations.ai (free, always works)
       - any other string → OpenRouter with modalities (paid, best quality)
     """
+    logger.info(f"[IMG] generate_image called: model={model_name}, prompt=\"{prompt[:80]}\"")
+
     if model_name == "pollinations":
         # Pollinations.ai — always free, no API key needed
         try:
@@ -340,10 +353,12 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status == 200:
+                        logger.info(f"[IMG] Pollinations URL: {url[:100]}")
                         return url
+            logger.info(f"[IMG] Pollinations URL (no head check): {url[:100]}")
             return url  # Return anyway — the image will be generated on fetch
         except Exception as e:
-            logger.error(f"Pollinations failed: {e}")
+            logger.error(f"[IMG] Pollinations failed: {e}")
             return None
 
     elif model_name == "zai-sidecar":
@@ -351,17 +366,18 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
         b64 = await _llm_handler.generate_image_sidecar(prompt)
         if b64:
             return f"data:image/png;base64,{b64}"
-        logger.warning("Sidecar image gen returned nothing, falling back to Pollinations")
+        logger.warning("[IMG] Sidecar image gen returned nothing, falling back to Pollinations")
         # Fallback to Pollinations
         encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
         return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
 
     else:
         # OpenRouter with modalities (model_name is an actual LLM model ID)
+        logger.info(f"[IMG] Trying OpenRouter image gen with model={model_name}")
         b64_or_url = await _llm_handler.generate_image_openrouter(prompt, model=model_name)
         if b64_or_url:
             return b64_or_url
-        logger.warning(f"OpenRouter image gen ({model_name}) failed, falling back to Pollinations")
+        logger.warning(f"[IMG] OpenRouter image gen ({model_name}) failed, falling back to Pollinations")
         encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
         return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
 

@@ -7,8 +7,7 @@ import random
 import time
 import re
 from collections import deque
-from datetime import timedelta
-from discord.utils import utcnow
+from datetime import timedelta, datetime, timezone
 from engine.markov import MarkovChain
 from utils import sanitize_message, search_gif
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
@@ -138,7 +137,7 @@ class Chat(commands.Cog):
             return None
         return clean
 
-    # FIX #1: Vision - analyze image attachments
+    # Vision - analyze image attachments
     async def _get_image_context(self, message):
         if not message.attachments:
             return None
@@ -163,7 +162,7 @@ class Chat(commands.Cog):
             print(f"[VISION] Error analyzing image: {e}")
         return None
 
-    # FIX #1: Web Search - now takes message object (not string)
+    # Web Search - takes message object (not string)
     async def _enrich_with_search(self, message):
         settings = await self.settings_manager.get_settings(message.guild.id)
         if not settings.get("web_search_enabled", True):
@@ -193,7 +192,7 @@ class Chat(commands.Cog):
             print(f"[SEARCH] Error: {e}")
         return None
 
-    # FIX #4: Proactive loop - fixed stale-channel continue (was no-op in inner loop)
+    # Proactive loop
     @tasks.loop(minutes=90)
     async def proactive_loop(self):
         await self.bot.wait_until_ready()
@@ -215,7 +214,7 @@ class Chat(commands.Cog):
                 continue
             try:
                 last_msgs = [m async for m in target_channel.history(limit=1)]
-                if not last_msgs or (utcnow() - last_msgs[0].created_at).total_seconds() > 7200:
+                if not last_msgs or (datetime.now(timezone.utc) - last_msgs[0].created_at).total_seconds() > 7200:
                     continue
             except Exception:
                 continue
@@ -236,7 +235,7 @@ class Chat(commands.Cog):
                 "pops into your head, say it. If nothing, say NO_THOUGHT"
             )
             chat_history.insert(0, {"role": "system", "content": prompt,
-                                "model": settings.get("llm_model", "meta-llama/llama-3-8b-instruct")})
+                                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
             response = await generate_llm_response(prompt, chat_history)
             if response and "NO_THOUGHT" not in response.upper():
                 response = re.sub(r'^.{0,30}?:\s*', '', response).strip()
@@ -280,7 +279,7 @@ class Chat(commands.Cog):
                 "chat log. Keep it under 500 words."
             )
             chat_history.insert(0, {"role": "system", "content": prompt,
-                                "model": settings.get("llm_model", "meta-llama/llama-3-8b-instruct")})
+                                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
             summary = await generate_llm_response(prompt, chat_history)
             if summary:
                 await self.db.save_consolidated_memory(guild.id, {"summary": summary, "timestamp": time.time()})
@@ -384,19 +383,32 @@ class Chat(commands.Cog):
             return
 
         # IMAGE GENERATION CHECK
+        # FIX v5.8: Image gen now fires on ANY message (not just mention/reply)
+        # when the trigger words are detected. The old code required mention/reply
+        # which made it almost impossible to trigger naturally.
         image_prompt = self._is_image_request(message.content)
-        if image_prompt and is_mentioned_or_replied(self.bot.user, message, settings):
+        if image_prompt:
+            # Check cooldown
+            skip_image = False
             if channel_id in self.channel_cooldowns:
                 if time.time() - self.channel_cooldowns[channel_id] < settings["cooldown_seconds"]:
-                    image_prompt = None
+                    skip_image = True
+
+            if not skip_image:
+                # Only require mention/reply for image gen if zai_image_gen_enabled is on
+                # (prevents random users from burning API credits)
+                # If image_model is "pollinations" (free), allow without mention
+                image_model = settings.get("image_model", "zai-sidecar")
+                requires_mention = image_model != "pollinations"
+
+                if requires_mention and not is_mentioned_or_replied(self.bot.user, message, settings):
+                    image_prompt = None  # Skip — not mentioned
                 else:
-                    image_model = settings.get("image_model", "zai-sidecar")
                     print(f"[IMAGE] Generating image with model={image_model}, prompt=\"{image_prompt[:80]}\"")
-                    async with message.channel.typing():
-                        image_url = await generate_image(image_prompt, model_name=image_model)
-                    # FIX #3: Handle base64 data URLs from Z.ai sidecar
-                    if image_url:
-                        try:
+                    try:
+                        async with message.channel.typing():
+                            image_url = await generate_image(image_prompt, model_name=image_model)
+                        if image_url:
                             if image_url.startswith("data:image/"):
                                 header, encoded = image_url.split(",", 1)
                                 ext = header.split("/")[1].split(";")[0]
@@ -413,10 +425,10 @@ class Chat(commands.Cog):
                             self.bot_recent_messages[guild_id] = self.bot_recent_messages[guild_id][-20:]
                             print("[IMAGE] Successfully sent image")
                             return
-                        except discord.errors.HTTPException as e:
-                            print(f"[IMAGE] Failed to send: {e}")
-                    else:
-                        print("[IMAGE] Generation returned None")
+                        else:
+                            print(f"[IMAGE] generate_image() returned None for model={image_model}")
+                    except Exception as e:
+                        print(f"[IMAGE] Exception during generation: {e}")
                     image_prompt = None
 
         # MESSAGE COUNTING
@@ -440,7 +452,7 @@ class Chat(commands.Cog):
         elif is_reply_to_bot and settings["trigger_on_reply"]:
             should_respond = True
 
-        # FIX #5: Check response_chance for non-direct triggers
+        # Check response_chance for non-direct triggers
         if not should_respond:
             window_seconds = settings.get("conversation_window_seconds", 120)
             indirect_chance = settings.get("indirect_reply_chance", 0.40)
@@ -452,7 +464,7 @@ class Chat(commands.Cog):
                 if random.random() < chance:
                     should_respond = True
 
-        # FIX #5: response_chance gates count-based triggers
+        # response_chance gates count-based triggers
         if not should_respond:
             response_chance = settings.get("response_chance", 0.15)
             if random.random() < response_chance:
@@ -544,7 +556,7 @@ class Chat(commands.Cog):
                         dynamic_prompt += f"\n\nPermanent memories about {message.author.display_name}:\n{memory_str}\nBe a smart-ass about these."
 
                     chat_history.insert(0, {"role": "system", "content": dynamic_prompt,
-                                        "model": settings.get("llm_model", "meta-llama/llama-3-8b-instruct")})
+                                        "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
 
                     llm_response = await generate_llm_response(dynamic_prompt, chat_history)
                     if llm_response:

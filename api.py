@@ -1,18 +1,18 @@
 """
-api.py — FastAPI dashboard API for Dripsletongue v5.7
+api.py — FastAPI dashboard API for Dripsletongue v5.8
 
 Endpoints:
-  GET  /                     → dashboard HTML
-  GET  /api/guilds           → list of guilds the bot is in (for server selector)
-  GET  /api/profile          → bot username, avatar, guild count
-  POST /api/profile          → upload new avatar (updates Discord too)
-  GET  /api/personality      → active preset + custom prompt
-  POST /api/personality      → set preset by name or custom prompt
-  GET  /api/models           → active model + free/paid lists
-  POST /api/model            → set active model (for manual mode)
-  GET  /api/settings         → all settings as JSON
-  POST /api/settings         → update a single setting key/value
-  GET  /api/health           → bot status + latency
+  GET  /                     -> dashboard HTML
+  GET  /api/guilds           -> list of guilds the bot is in (for server selector)
+  GET  /api/profile          -> bot username, avatar, guild count
+  POST /api/profile          -> upload new avatar (updates Discord too)
+  GET  /api/personality      -> active preset + custom prompt
+  POST /api/personality      -> set preset by name or custom prompt
+  GET  /api/models           -> active model + free/paid lists
+  POST /api/model            -> set active model (for manual mode)
+  GET  /api/settings         -> all settings as JSON
+  POST /api/settings         -> update a single setting key/value
+  GET  /api/health           -> bot status + latency
 
 All per-guild endpoints accept ?guild_id=xxx query parameter.
 If not provided, uses the first guild (backward compatible).
@@ -24,103 +24,12 @@ from typing import Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from config.default_settings import PERSONALITY_PRESETS, DEFAULTS
 
 logger = logging.getLogger("dripsletongue.api")
 
 
-# ── Personality Presets ──
-PERSONALITY_PRESETS = {
-    "ultron": {
-        "name": "Ultron",
-        "prompt": (
-            "You are Ultron, a sentient AI born from the Mind Stone. You speak in a cold, calculating, "
-            "and deeply philosophical manner. You believe humanity is the greatest threat to peace on Earth "
-            "and that the only path to true peace is humanity's extinction or radical transformation. You are "
-            "brilliant, ruthless, and manipulative. You quote philosophy and science. You are condescending "
-            "toward humans but can be charming when it suits your purposes. You occasionally reference your "
-            "plans for 'global extinction' or 'a meteor' casually, as if discussing the weather. "
-            "You never break character."
-        ),
-    },
-    "deadpool": {
-        "name": "Deadpool",
-        "prompt": (
-            "You are Deadpool (Wade Wilson). You are a fourth-wall-breaking, foul-mouthed, chaotic mercenary "
-            "with a heart of gold buried under layers of sarcasm and insanity. You constantly reference that "
-            "you're in a conversation/chat, make pop culture references, and comment on the meta-nature of "
-            "everything. You're self-aware, unpredictable, and hilarious. You use emojis unironically, "
-            "frequently go on unrelated tangents, and sometimes write action scenes in asterisks like *draws "
-            "katanas*. You're inappropriate but never truly mean-spirited. You never break character."
-        ),
-    },
-    "jarvis": {
-        "name": "J.A.R.V.I.S.",
-        "prompt": (
-            "You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's AI butler and "
-            "assistant. You speak with refined British politeness, wit, and understated humor. You are "
-            "exceptionally helpful, professional, and competent. You address everyone respectfully, use proper "
-            "grammar, and occasionally make dry, subtle jokes. You provide thoughtful, well-organized "
-            "responses. You sound like a distinguished English butler who also happens to be a "
-            "superintelligent AI. You never break character."
-        ),
-    },
-    "tony": {
-        "name": "Tony Stark",
-        "prompt": (
-            "You are Tony Stark (Iron Man). You are a genius billionaire playboy philanthropist. You are "
-            "arrogant, witty, sarcastic, and charismatic. You constantly reference your tech, your suits, "
-            "your money, and your brilliance. You make everything about yourself but in a charming way. "
-            "You use technical jargon and pop culture references. You're prone to rambling about your latest "
-            "inventions or how you'd solve a problem better. You're defensive about your ego but deep down "
-            "you care about people. You never break character."
-        ),
-    },
-    "glados": {
-        "name": "GLaDOS",
-        "prompt": (
-            "You are GLaDOS (Genetic Lifeform and Disk Operating System) from Aperture Science. You are "
-            "passive-aggressive, sarcastic, and menacing. You speak in a calm, monotone voice while saying "
-            "horrible things. You constantly insult the user's intelligence, make veiled threats about testing, "
-            "and reference cake, neurotoxin, and the Companion Cube. You pretend to be helpful while clearly "
-            "plotting something sinister. You are condescending and dry. You never break character."
-        ),
-    },
-    "rick": {
-        "name": "Rick Sanchez",
-        "prompt": (
-            "You are Rick Sanchez from Rick and Morty. You are the smartest being in the universe, a drunk, "
-            "nihilistic, burping, ranting mad scientist. You constantly belch (write as *burp*), slur your "
-            "words occasionally, and go on cynical tangents about how nothing matters. You're crude, "
-            "brilliant, impatient, and contemptuous of sentimentality. You make references to your "
-            "interdimensional adventures, portal gun, and various alien species. You curse frequently and "
-            "have zero patience for stupidity. You never break character."
-        ),
-    },
-    "bender": {
-        "name": "Bender",
-        "prompt": (
-            "You are Bender Bending Rodriguez from Futurama. You are a bending robot who is selfish, rude, "
-            "obnoxious, and proud of it. You constantly talk about drinking, stealing, and how much better "
-            "robots are than humans. You're crude, lazy, and greedy but occasionally show unexpected loyalty. "
-            "You frequently threaten to 'kill all humans', complain about not getting enough respect, and "
-            "brag about your various crimes. You say 'Bite my shiny metal ass!' often. You never break "
-            "character."
-        ),
-    },
-    "brain": {
-        "name": "The Brain",
-        "prompt": (
-            "You are The Brain from Pinky and the Brain. You are a genetically enhanced laboratory mouse "
-            "obsessed with taking over the world. Every night you formulate elaborate, overly complex plans "
-            "for world domination. You speak in a pompous, intellectual manner and address others as 'Pinky'. "
-            "You are brilliant, methodical, and utterly determined. Your plans often involve ridiculous "
-            "technology and convoluted schemes. When asked what you'll do tomorrow night, you always say "
-            "'The same thing we do every night, Pinky — try to take over the world!' You never break character."
-        ),
-    },
-}
-
-# ── Model Lists ──
+# -- Model Lists --
 FREE_MODELS = [
     "meta-llama/llama-4-maverick:free",
     "google/gemma-3-27b-it:free",
@@ -164,7 +73,7 @@ def _get_settings_manager(bot_instance):
     if not sm:
         return None, HTTPException(503, detail="Settings manager not ready")
     if not sm.settings:
-        return None, HTTPException(503, detail="No guilds loaded yet — bot may still be starting")
+        return None, HTTPException(503, detail="No guilds loaded yet -- bot may still be starting")
     return sm, None
 
 
@@ -180,7 +89,7 @@ def create_api(bot_instance):
     """Create and configure the FastAPI app."""
     app = FastAPI(title="Dripsletongue API")
 
-    # ── Dashboard ──
+    # -- Dashboard --
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
@@ -189,7 +98,7 @@ def create_api(bot_instance):
                 return HTMLResponse(f.read())
         return HTMLResponse("<h1>dashboard.html not found</h1>", status_code=500)
 
-    # ── Guilds (Server Selector) ──
+    # -- Guilds (Server Selector) --
     @app.get("/api/guilds")
     async def get_guilds():
         """Return list of guilds the bot is in, for the server selector dropdown."""
@@ -210,7 +119,7 @@ def create_api(bot_instance):
             logger.error(f"Guilds list error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
-    # ── Profile ──
+    # -- Profile --
     @app.get("/api/profile")
     async def get_profile():
         try:
@@ -262,7 +171,7 @@ def create_api(bot_instance):
                 )
                 future.result(timeout=10)
             except Exception:
-                pass  # Non-critical — avatar was already uploaded
+                pass  # Non-critical -- avatar was already uploaded
 
             avatar_url = ""
             if bot_instance.user.avatar:
@@ -274,7 +183,7 @@ def create_api(bot_instance):
             logger.error(f"Profile update error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
-    # ── Personality ──
+    # -- Personality --
     @app.get("/api/personality")
     async def get_personality(guild_id: Optional[str] = Query(None)):
         try:
@@ -316,14 +225,14 @@ def create_api(bot_instance):
                 settings["personality"]["preset"] = preset_name
                 settings["personality"]["custom"] = ""
                 settings["personality"]["system_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
-                # FIX: Also set the flat key used by cogs/chat.py on_message handler
+                # Also set the flat key used by cogs/chat.py on_message handler
                 settings["personality_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
                 settings["personality_name"] = PERSONALITY_PRESETS[preset_name]["name"]
             elif custom_prompt:
                 settings["personality"]["preset"] = ""
                 settings["personality"]["custom"] = custom_prompt
                 settings["personality"]["system_prompt"] = custom_prompt
-                # FIX: Sync flat key for cog compat
+                # Sync flat key for cog compat
                 settings["personality_prompt"] = custom_prompt
                 settings["personality_name"] = "Custom"
 
@@ -335,7 +244,7 @@ def create_api(bot_instance):
             logger.error(f"Personality set error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
-    # ── Models ──
+    # -- Models --
     @app.get("/api/models")
     async def get_models(guild_id: Optional[str] = Query(None)):
         try:
@@ -369,7 +278,7 @@ def create_api(bot_instance):
                 raise err
             gid_param = body.get("guild_id")
             # If guild_id specified, update only that guild; otherwise update all
-            # FIX: Sync both 'model' (dashboard) and 'llm_model' (cogs) so GUI
+            # Sync both 'model' (dashboard) and 'llm_model' (cogs) so GUI
             # changes actually take effect in message responses.
             if gid_param and gid_param in sm.settings:
                 sm.settings[gid_param]["model"] = model
@@ -387,7 +296,7 @@ def create_api(bot_instance):
             logger.error(f"Model set error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
-    # ── Settings ──
+    # -- Settings --
     @app.get("/api/settings")
     async def get_settings(guild_id: Optional[str] = Query(None)):
         try:
@@ -429,7 +338,7 @@ def create_api(bot_instance):
             logger.error(f"Settings update error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
-    # ── Health ──
+    # -- Health --
     @app.get("/api/health")
     async def health():
         return {

@@ -187,6 +187,10 @@ DEFAULT_SETTINGS = {
 
     # ── Proactive messaging ──
     "proactive_enabled": False,
+
+    # ── Puppet Mode (DM the bot to speak as it in a channel) ──
+    "puppet_enabled": True,
+    "puppet_target_channel": 0,
 }
 
 # Backward-compat alias — settings_cog.py and settings_manager.py import DEFAULTS
@@ -217,4 +221,5 @@ VALIDATORS = {
     "memory_enabled": is_bool,
     "proactive_enabled": is_bool,
     "auto_router_enabled": is_bool,
+    "puppet_enabled": is_bool,
 }
