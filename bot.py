@@ -96,18 +96,18 @@ class SettingsManager:
         self.settings = {}  # {guild_id: {key: value, ...}}
 
     async def init(self):
-        """Load all settings from DB, filling defaults for missing keys."""
+        """Create table if needed, then load all settings from DB."""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, settings TEXT)"
+            )
+            await db.commit()
             async with db.execute("SELECT guild_id, settings FROM guild_settings") as cursor:
                 async for row in cursor:
                     gid, raw = row
                     saved = json.loads(raw) if raw else {}
                     merged = {**DEFAULT_SETTINGS, **saved}
                     self.settings[str(gid)] = merged
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, settings TEXT)"
-            )
-            await db.commit()
 
     async def get_settings(self, guild_id: str) -> dict:
         if guild_id not in self.settings:
