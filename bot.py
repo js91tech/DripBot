@@ -25,7 +25,7 @@ logger = logging.getLogger("dripsletongue")
 TOKEN = os.environ.get("DISCORD_TOKEN", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 BOT_PREFIX = os.environ.get("BOT_PREFIX", "!")
-DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", 8080))
+DASHBOARD_PORT = int(os.environ.get("PORT") or os.environ.get("DASHBOARD_PORT", 8080))
 SIDECAR_PORT = int(os.environ.get("ZAI_SIDECAR_PORT", 3456))
 
 if not TOKEN:
@@ -46,6 +46,7 @@ bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None
 # ═══════════════════════════════════════════════════════════════
 
 sidecar_process = None
+dashboard_started = False
 
 try:
     sidecar_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zai_sidecar.py")
@@ -258,6 +259,10 @@ async def reset_personality(ctx):
 
 def start_dashboard():
     """Start the FastAPI dashboard in a background thread."""
+    global dashboard_started
+    if dashboard_started:
+        return
+
     import uvicorn
     from api import create_api
 
@@ -269,6 +274,7 @@ def start_dashboard():
         daemon=True,
     )
     thread.start()
+    dashboard_started = True
     logger.info(f"Dashboard running on port {DASHBOARD_PORT}")
 
 
@@ -277,15 +283,22 @@ def start_dashboard():
 # ═══════════════════════════════════════════════════════════════
 
 def keep_alive():
-    """Ping self every 14 minutes to prevent Render spin-down."""
+    """Ping a health URL periodically.
+
+    This keeps the dashboard route warm while the process is running. For hosts
+    that sleep idle services, configure KEEP_ALIVE_URL to the public /api/health
+    URL and use an external uptime monitor too; a sleeping process cannot wake
+    itself.
+    """
     import urllib.request
 
     url = os.environ.get("KEEP_ALIVE_URL", f"http://localhost:{DASHBOARD_PORT}/api/health")
+    logger.info(f"Keep-alive target: {url}")
     while True:
         try:
             urllib.request.urlopen(url, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Keep-alive ping failed: {e}")
         time.sleep(840)  # 14 minutes
 
 
@@ -294,6 +307,9 @@ def keep_alive():
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    # Bind the web health endpoint before Discord login so web hosts see us as healthy.
+    start_dashboard()
+
     # Start keep-alive in background
     keep_thread = threading.Thread(target=keep_alive, daemon=True)
     keep_thread.start()

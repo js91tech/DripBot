@@ -1,9 +1,12 @@
 services:
-  - type: worker
+  - type: web
     name: discord-markov-bot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /api/health
     envVars:
       - key: DISCORD_TOKEN
+        sync: false
+      - key: KEEP_ALIVE_URL
         sync: false
