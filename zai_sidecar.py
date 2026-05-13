@@ -225,7 +225,7 @@ def main():
         logger.error(f"z-ai CLI not available: {e}")
         logger.error("Sidecar endpoints will return errors until z-ai is installed.")
 
-    server = HTTPServer(("0.0.0.0", PORT), SidecarHandler)
+    server = HTTPServer(("127.0.0.1", PORT), SidecarHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
