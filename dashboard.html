@@ -65,6 +65,52 @@
   .header .auto-badge.visible { display: inline-block; }
   .container { max-width: 960px; margin: 0 auto; padding: 24px; }
 
+  /* Server Selector */
+  .server-selector {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .server-selector label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .server-selector select {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238892a4' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  .server-selector select:focus { border-color: var(--accent); }
+  .server-selector select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+  .server-selector .member-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
   /* Tabs */
   .tabs-nav {
     display: flex;
@@ -365,10 +411,20 @@
 <div class="header">
   <h1>Dripsletongue Control Panel</h1>
   <span class="version">v5.7</span>
+  <div class="spacer"></div>
   <span class="auto-badge" id="autoBadge">AUTO ROUTER</span>
 </div>
 
 <div class="container">
+  <!-- Server Selector -->
+  <div class="server-selector">
+    <label>Server:</label>
+    <select id="guildSelect" onchange="onGuildChange()">
+      <option value="">Loading servers...</option>
+    </select>
+    <span class="member-count" id="memberCount"></span>
+  </div>
+
   <div class="tabs-nav">
     <button class="tab-btn active" onclick="switchTab('profile', this)">Profile</button>
     <button class="tab-btn" onclick="switchTab('personality', this)">Personality</button>
@@ -468,9 +524,120 @@
 
 <script>
 // ── State ──
+let selectedGuildId = '';
+let allGuilds = [];
 let autoRouterEnabled = false;
 let activeModel = '';
 let allowedModels = [];
+
+// ── Guild Selector ──
+function getGuildId() {
+  return selectedGuildId || '';
+}
+
+function guildQuery() {
+  const gid = getGuildId();
+  return gid ? '?guild_id=' + encodeURIComponent(gid) : '';
+}
+
+async function loadGuilds() {
+  try {
+    const data = await apiCall('GET', '/api/guilds');
+    if (!data || !data.guilds || data.guilds.length === 0) {
+      document.getElementById('guildSelect').innerHTML = '<option value="">No servers found</option>';
+      return;
+    }
+    const select = document.getElementById('guildSelect');
+    select.innerHTML = '';
+    // Restore last selection from localStorage
+    const savedGid = localStorage.getItem('dripsletongue_guild_id');
+    let found = false;
+    for (const g of data.guilds) {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name;
+      select.appendChild(opt);
+      if (savedGid === g.id) {
+        select.value = g.id;
+        found = true;
+      }
+    }
+    // Default to first guild if nothing saved
+    if (!found) {
+      selectedGuildId = data.guilds[0].id;
+      select.value = selectedGuildId;
+    } else {
+      selectedGuildId = savedGid;
+    }
+    allGuilds = data.guilds;
+    updateMemberCount();
+    // Load data for the selected guild
+    await loadGuildData();
+  } catch (e) {
+    document.getElementById('guildSelect').innerHTML = '<option value="">Failed to load servers</option>';
+  }
+}
+
+function updateMemberCount() {
+  const countEl = document.getElementById('memberCount');
+  const gid = getGuildId();
+  if (!allGuilds || !gid) { countEl.textContent = ''; return; }
+  const g = allGuilds.find(x => x.id === gid);
+  countEl.textContent = g ? g.member_count + ' members' : '';
+}
+
+function onGuildChange() {
+  selectedGuildId = document.getElementById('guildSelect').value;
+  localStorage.setItem('dripsletongue_guild_id', selectedGuildId);
+  updateMemberCount(allGuilds);
+  // Reload all data for the new guild
+  loadGuildData();
+}
+
+async function loadGuildData() {
+  // Personality
+  try {
+    const pers = await apiCall('GET', '/api/personality' + guildQuery());
+    if (pers) {
+      if (pers.custom_prompt) document.getElementById('customPersonality').value = pers.custom_prompt;
+      renderPresets(pers.active_preset || '');
+    } else { renderPresets(''); }
+  } catch(e) { renderPresets(''); }
+
+  // Models + Settings + Auto Router
+  try {
+    const s = await apiCall('GET', '/api/settings' + guildQuery());
+    if (s) {
+      renderSettings(s);
+      if (s.auto_router_enabled) {
+        autoRouterEnabled = true;
+        document.getElementById('autoRouterToggle').classList.add('on');
+        document.getElementById('autoBadge').classList.add('visible');
+        document.getElementById('allowedModelsSection').style.display = 'block';
+        allowedModels = s.auto_router_allowed_models || [];
+      } else {
+        autoRouterEnabled = false;
+        document.getElementById('autoRouterToggle').classList.remove('on');
+        document.getElementById('autoBadge').classList.remove('visible');
+        document.getElementById('allowedModelsSection').style.display = 'none';
+        allowedModels = [];
+      }
+      const models = await apiCall('GET', '/api/models' + guildQuery());
+      if (models) renderModels(models.active_model || '');
+      renderAllowedChips();
+    } else {
+      renderModels('');
+      renderAllowedChips();
+      const defaults = {};
+      SETTINGS.forEach(s => defaults[s.key] = false);
+      defaults.response_enabled = true;
+      renderSettings(defaults);
+    }
+  } catch(e) {
+    renderModels('');
+    renderAllowedChips();
+  }
+}
 
 // ── Toast ──
 function showToast(msg, type = 'info') {
@@ -553,7 +720,7 @@ async function selectPreset(id) {
   const preset = PRESETS.find(p => p.id === id);
   if (!preset) return;
   showToast('Applying ' + preset.name + '...', 'info');
-  const result = await apiCall('POST', '/api/personality', { name: id });
+  const result = await apiCall('POST', '/api/personality', { name: id, guild_id: getGuildId() });
   if (result) {
     renderPresets(id);
     showToast('Preset applied: ' + preset.name, 'success');
@@ -565,7 +732,7 @@ async function saveCustomPersonality() {
   const prompt = document.getElementById('customPersonality').value.trim();
   if (!prompt) { showToast('Write a personality prompt first.', 'error'); return; }
   showToast('Saving custom personality...', 'info');
-  const result = await apiCall('POST', '/api/personality', { custom: prompt });
+  const result = await apiCall('POST', '/api/personality', { custom: prompt, guild_id: getGuildId() });
   if (result) {
     renderPresets('');
     showToast('Custom personality saved!', 'success');
@@ -592,7 +759,7 @@ async function toggleAutoRouter() {
     document.getElementById('activeModelName').textContent = activeModel ? activeModel.split('/').pop() : 'None';
   }
 
-  const result = await apiCall('POST', '/api/settings', { key: 'auto_router_enabled', value: autoRouterEnabled });
+  const result = await apiCall('POST', '/api/settings', { key: 'auto_router_enabled', value: autoRouterEnabled, guild_id: getGuildId() });
   if (result) showToast('Auto Router ' + (autoRouterEnabled ? 'enabled' : 'disabled'), 'success');
 }
 
@@ -619,7 +786,7 @@ async function toggleAllowedModel(pattern, el) {
   if (idx >= 0) { allowedModels.splice(idx, 1); }
   else { allowedModels.push(pattern); }
   el.classList.toggle('selected');
-  await apiCall('POST', '/api/settings', { key: 'auto_router_allowed_models', value: allowedModels });
+  await apiCall('POST', '/api/settings', { key: 'auto_router_allowed_models', value: allowedModels, guild_id: getGuildId() });
 }
 
 // ── Models ──
@@ -671,7 +838,7 @@ function renderModels(active) {
 async function selectModel(model) {
   if (autoRouterEnabled) return;
   showToast('Switching model...', 'info');
-  const result = await apiCall('POST', '/api/model', { model });
+  const result = await apiCall('POST', '/api/model', { model: model, guild_id: getGuildId() });
   if (result) {
     renderModels(model);
     showToast('Model: ' + shortName(model), 'success');
@@ -703,7 +870,7 @@ function renderSettings(settings) {
 
 async function toggleSetting(key, el) {
   const newVal = !el.classList.contains('on');
-  const result = await apiCall('POST', '/api/settings', { key, value: newVal });
+  const result = await apiCall('POST', '/api/settings', { key, value: newVal, guild_id: getGuildId() });
   if (result !== null) {
     el.classList.toggle('on', newVal);
     showToast(key.replace(/_/g, ' ') + ' ' + (newVal ? 'enabled' : 'disabled'), 'success');
@@ -712,7 +879,7 @@ async function toggleSetting(key, el) {
 
 // ── Init ──
 async function init() {
-  // Profile
+  // Profile (no guild needed)
   try {
     const p = await apiCall('GET', '/api/profile');
     if (p) {
@@ -722,43 +889,8 @@ async function init() {
     }
   } catch(e) {}
 
-  // Personality
-  try {
-    const pers = await apiCall('GET', '/api/personality');
-    if (pers) {
-      if (pers.custom_prompt) document.getElementById('customPersonality').value = pers.custom_prompt;
-      renderPresets(pers.active_preset || '');
-    } else { renderPresets(''); }
-  } catch(e) { renderPresets(''); }
-
-  // Models + Auto Router state
-  try {
-    const s = await apiCall('GET', '/api/settings');
-    if (s) {
-      renderSettings(s);
-      // Restore auto-router state
-      if (s.auto_router_enabled) {
-        autoRouterEnabled = true;
-        document.getElementById('autoRouterToggle').classList.add('on');
-        document.getElementById('autoBadge').classList.add('visible');
-        document.getElementById('allowedModelsSection').style.display = 'block';
-        allowedModels = s.auto_router_allowed_models || [];
-      }
-      const models = await apiCall('GET', '/api/models');
-      if (models) renderModels(models.active_model || '');
-      renderAllowedChips();
-    } else {
-      renderModels('');
-      renderAllowedChips();
-      const defaults = {};
-      SETTINGS.forEach(s => defaults[s.key] = false);
-      defaults.response_enabled = true;
-      renderSettings(defaults);
-    }
-  } catch(e) {
-    renderModels('');
-    renderAllowedChips();
-  }
+  // Load guild list, then load data for selected guild
+  await loadGuilds();
 }
 
 init();

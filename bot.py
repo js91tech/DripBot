@@ -126,6 +126,9 @@ class SettingsManager:
 
 settings_manager = SettingsManager()
 
+# ── CRITICAL FIX: Attach to bot instance so api.py can find it ──
+bot.settings_manager = settings_manager
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Memory Manager
@@ -175,6 +178,9 @@ class MemoryManager:
 
 
 memory_manager = MemoryManager()
+
+# Attach to bot instance too
+bot.memory_manager = memory_manager
 
 
 # ═══════════════════════════════════════════════════════════════

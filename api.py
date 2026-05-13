@@ -3,6 +3,7 @@ api.py — FastAPI dashboard API for Dripsletongue v5.7
 
 Endpoints:
   GET  /                     → dashboard HTML
+  GET  /api/guilds           → list of guilds the bot is in (for server selector)
   GET  /api/profile          → bot username, avatar, guild count
   POST /api/profile          → upload new avatar (updates Discord too)
   GET  /api/personality      → active preset + custom prompt
@@ -12,14 +13,16 @@ Endpoints:
   GET  /api/settings         → all settings as JSON
   POST /api/settings         → update a single setting key/value
   GET  /api/health           → bot status + latency
+
+All per-guild endpoints accept ?guild_id=xxx query parameter.
+If not provided, uses the first guild (backward compatible).
 """
 
-import base64
 import logging
 import os
 from typing import Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 logger = logging.getLogger("dripsletongue.api")
@@ -155,6 +158,24 @@ PAID_MODELS = [
 ]
 
 
+def _get_settings_manager(bot_instance):
+    """Get settings manager from bot instance. Returns (sm, error_response)."""
+    sm = getattr(bot_instance, "settings_manager", None)
+    if not sm:
+        return None, HTTPException(503, detail="Settings manager not ready")
+    if not sm.settings:
+        return None, HTTPException(503, detail="No guilds loaded yet — bot may still be starting")
+    return sm, None
+
+
+def _resolve_guild_id(bot_instance, sm, guild_id: Optional[str] = None) -> str:
+    """Resolve which guild_id to use. Returns gid string."""
+    if guild_id and guild_id in sm.settings:
+        return guild_id
+    # Fallback to first available guild
+    return list(sm.settings.keys())[0]
+
+
 def create_api(bot_instance):
     """Create and configure the FastAPI app."""
     app = FastAPI(title="Dripsletongue API")
@@ -167,6 +188,27 @@ def create_api(bot_instance):
             with open(html_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(f.read())
         return HTMLResponse("<h1>dashboard.html not found</h1>", status_code=500)
+
+    # ── Guilds (Server Selector) ──
+    @app.get("/api/guilds")
+    async def get_guilds():
+        """Return list of guilds the bot is in, for the server selector dropdown."""
+        try:
+            guilds = []
+            for g in bot_instance.guilds:
+                icon_url = ""
+                if g.icon:
+                    icon_url = f"https://cdn.discordapp.com/icons/{g.id}/{g.icon}.png?size=64"
+                guilds.append({
+                    "id": str(g.id),
+                    "name": g.name,
+                    "icon": icon_url,
+                    "member_count": g.member_count,
+                })
+            return {"guilds": guilds}
+        except Exception as e:
+            logger.error(f"Guilds list error: {e}", exc_info=True)
+            raise HTTPException(500, detail=str(e))
 
     # ── Profile ──
     @app.get("/api/profile")
@@ -193,23 +235,39 @@ def create_api(bot_instance):
         try:
             if avatar is None:
                 raise HTTPException(400, detail="No avatar file provided")
-            if avatar.size and avatar.size > 512 * 1024:
-                raise HTTPException(400, detail="Image must be under 512KB")
             contents = await avatar.read()
             if not contents:
                 raise HTTPException(400, detail="Empty file")
+            if len(contents) > 512 * 1024:
+                raise HTTPException(400, detail="Image must be under 512KB")
 
-            b64 = base64.b64encode(contents).decode("utf-8")
-            mime = avatar.content_type or "image/png"
+            # discord.py runs on the bot's event loop, but uvicorn is in a
+            # separate thread. Use run_coroutine_threadsafe to bridge them.
+            import asyncio
+            loop = bot_instance.loop
 
             try:
-                route = Route("PATCH", "/users/@me")
-                await bot_instance.http.request(route, json={"avatar": f"data:{mime};base64,{b64}"})
+                future = asyncio.run_coroutine_threadsafe(
+                    bot_instance.user.edit(avatar=contents), loop
+                )
+                future.result(timeout=15)
             except Exception as discord_err:
                 logger.error(f"Discord avatar update failed: {discord_err}", exc_info=True)
                 raise HTTPException(500, detail=f"Discord rejected avatar: {discord_err}")
 
-            return {"success": True, "avatar_url": f"https://cdn.discordapp.com/avatars/{bot_instance.user.id}/{bot_instance.user.avatar}.png?size=256"}
+            # Refresh user object to get new avatar hash
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    bot_instance.user.fetch(), loop
+                )
+                future.result(timeout=10)
+            except Exception:
+                pass  # Non-critical — avatar was already uploaded
+
+            avatar_url = ""
+            if bot_instance.user.avatar:
+                avatar_url = f"https://cdn.discordapp.com/avatars/{bot_instance.user.id}/{bot_instance.user.avatar}.png?size=256"
+            return {"success": True, "avatar_url": avatar_url}
         except HTTPException:
             raise
         except Exception as e:
@@ -218,17 +276,19 @@ def create_api(bot_instance):
 
     # ── Personality ──
     @app.get("/api/personality")
-    async def get_personality():
+    async def get_personality(guild_id: Optional[str] = Query(None)):
         try:
-            sm = getattr(bot_instance, "settings_manager", None)
-            if not sm or not sm.settings:
-                return {"active_preset": "", "custom_prompt": ""}
-            gid = list(sm.settings.keys())[0]
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid = _resolve_guild_id(bot_instance, sm, guild_id)
             personality = sm.settings[gid].get("personality", {})
             return {
                 "active_preset": personality.get("preset", ""),
                 "custom_prompt": personality.get("custom", ""),
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Personality get error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
@@ -237,10 +297,11 @@ def create_api(bot_instance):
     async def set_personality(request: Request):
         try:
             body = await request.json()
-            sm = getattr(bot_instance, "settings_manager", None)
-            if not sm or not sm.settings:
-                raise HTTPException(503, detail="Settings manager not ready")
-            gid = list(sm.settings.keys())[0]
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid_param = body.get("guild_id")
+            gid = _resolve_guild_id(bot_instance, sm, gid_param)
             settings = sm.settings[gid]
 
             if "personality" not in settings:
@@ -270,14 +331,18 @@ def create_api(bot_instance):
 
     # ── Models ──
     @app.get("/api/models")
-    async def get_models():
+    async def get_models(guild_id: Optional[str] = Query(None)):
         try:
-            sm = getattr(bot_instance, "settings_manager", None)
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
             active = "meta-llama/llama-4-maverick:free"
             if sm and sm.settings:
-                gid = list(sm.settings.keys())[0]
+                gid = _resolve_guild_id(bot_instance, sm, guild_id)
                 active = sm.settings[gid].get("model", active)
             return {"active_model": active, "free_models": FREE_MODELS, "paid_models": PAID_MODELS}
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Models get error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
@@ -292,12 +357,18 @@ def create_api(bot_instance):
             all_models = FREE_MODELS + PAID_MODELS
             if model not in all_models:
                 raise HTTPException(400, detail=f"Unknown model: {model}")
-            sm = getattr(bot_instance, "settings_manager", None)
-            if not sm or not sm.settings:
-                raise HTTPException(503, detail="Settings manager not ready")
-            for gid in sm.settings:
-                sm.settings[gid]["model"] = model
-                await sm.save_settings(gid)
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid_param = body.get("guild_id")
+            # If guild_id specified, update only that guild; otherwise update all
+            if gid_param and gid_param in sm.settings:
+                sm.settings[gid_param]["model"] = model
+                await sm.save_settings(gid_param)
+            else:
+                for gid in sm.settings:
+                    sm.settings[gid]["model"] = model
+                    await sm.save_settings(gid)
             return {"success": True, "model": model}
         except HTTPException:
             raise
@@ -307,12 +378,15 @@ def create_api(bot_instance):
 
     # ── Settings ──
     @app.get("/api/settings")
-    async def get_settings():
+    async def get_settings(guild_id: Optional[str] = Query(None)):
         try:
-            sm = getattr(bot_instance, "settings_manager", None)
-            if not sm or not sm.settings:
-                return {}
-            return sm.settings[list(sm.settings.keys())[0]]
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid = _resolve_guild_id(bot_instance, sm, guild_id)
+            return sm.settings[gid]
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Settings get error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
@@ -325,12 +399,18 @@ def create_api(bot_instance):
             value = body.get("value")
             if key is None or value is None:
                 raise HTTPException(400, detail="key and value required")
-            sm = getattr(bot_instance, "settings_manager", None)
-            if not sm or not sm.settings:
-                raise HTTPException(503, detail="Settings manager not ready")
-            for gid in sm.settings:
-                sm.settings[gid][key] = value
-                await sm.save_settings(gid)
+            sm, err = _get_settings_manager(bot_instance)
+            if err:
+                raise err
+            gid_param = body.get("guild_id")
+            # If guild_id specified, update only that guild; otherwise update all
+            if gid_param and gid_param in sm.settings:
+                sm.settings[gid_param][key] = value
+                await sm.save_settings(gid_param)
+            else:
+                for gid in sm.settings:
+                    sm.settings[gid][key] = value
+                    await sm.save_settings(gid)
             return {"success": True, "key": key, "value": value}
         except HTTPException:
             raise
