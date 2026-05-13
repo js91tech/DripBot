@@ -1,6 +1,8 @@
 import os
 import io
 import base64
+import asyncio
+import contextlib
 import discord
 from discord.ext import commands, tasks
 import random
@@ -76,6 +78,33 @@ IMAGE_FALSE_POSITIVES = [
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
+
+
+@contextlib.asynccontextmanager
+async def _noop_typing():
+    """Drop-in replacement for `channel.typing()` when the typing indicator
+    is disabled in settings — keeps `async with` callers unchanged."""
+    yield
+
+
+def _typing_ctx(channel, settings):
+    """Return either `channel.typing()` or a no-op async context manager
+    based on `typing_indicator_enabled`."""
+    if settings.get("typing_indicator_enabled", True):
+        return channel.typing()
+    return _noop_typing()
+
+
+async def _minimum_typing_delay(settings):
+    """Sleep a short minimum so the Discord 'typing...' indicator is
+    actually visible to users even when the LLM responds instantly.
+    Capped at 5 seconds to avoid feeling laggy."""
+    if not settings.get("typing_indicator_enabled", True):
+        return
+    delay = float(settings.get("typing_delay_seconds", 1.5) or 0)
+    delay = max(0.0, min(delay, 5.0))
+    if delay > 0:
+        await asyncio.sleep(delay)
 
 
 class Chat(commands.Cog):
@@ -406,7 +435,7 @@ class Chat(commands.Cog):
                 else:
                     print(f"[IMAGE] Generating image with model={image_model}, prompt=\"{image_prompt[:80]}\"")
                     try:
-                        async with message.channel.typing():
+                        async with _typing_ctx(message.channel, settings):
                             image_url = await generate_image(image_prompt, model_name=image_model)
                         if image_url:
                             if image_url.startswith("data:image/"):
@@ -489,7 +518,7 @@ class Chat(commands.Cog):
                 except discord.errors.HTTPException:
                     pass
 
-            async with message.channel.typing():
+            async with _typing_ctx(message.channel, settings):
                 image_description = await self._get_image_context(message)
                 web_context = await self._enrich_with_search(message)
 
@@ -613,6 +642,7 @@ class Chat(commands.Cog):
                             final_content = random.choice(FALLBACK_QUOTES)
 
                 if final_content:
+                    await _minimum_typing_delay(settings)
                     try:
                         await message.channel.send(final_content, reference=reference)
                         self.channel_cooldowns[channel_id] = time.time()
