@@ -1,16 +1,19 @@
 """
-llm.py — Complete replacement for your existing llm.py
+llm.py — Complete LLM handler for Dripsletongue v5.8
 
 Features:
-  - OpenRouter Auto Router (openrouter/auto) with optional allowed_models
-  - Manual model fallback if auto-router is disabled
+  - OpenRouter chat completions (manual model + auto router)
+  - OpenRouter image generation via modalities API
   - Z.ai sidecar integration (vision, image gen, web search)
-  - Graceful degradation when sidecar is down
+  - Pollinations.ai fallback for image gen
+  - Module-level wrapper functions for cog compatibility
 
 Drop this file in your project root, replacing the old llm.py.
 """
 
 import aiohttp
+import hashlib
+import json
 import logging
 import os
 from typing import Optional, List
@@ -117,7 +120,85 @@ class LLMHandler:
             logger.error(f"Chat error: {e}")
             return None
 
-    # ── Z.ai Sidecar: Image Analysis ──
+    # ── OpenRouter Image Generation (via modalities) ──
+
+    async def generate_image_openrouter(self, prompt: str, model: str = "openai/gpt-4o",
+                                        size: str = "1024x1024") -> str:
+        """
+        Generate an image via OpenRouter using the modalities API.
+        Returns a data:image URL or empty string on failure.
+        """
+        if not self.api_key:
+            logger.error("No OPENROUTER_API_KEY set")
+            return ""
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/dripsletongue",
+            "X-Title": "Dripsletongue Bot",
+        }
+
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": f"Generate an image: {prompt}"}],
+            "modalities": ["text", "image"],
+            "temperature": 0.7,
+            "max_tokens": 2048,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{OPENROUTER_BASE}/chat/completions",
+                    json=body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"OpenRouter image gen {resp.status}: {error_text[:300]}")
+                        return ""
+
+                    data = await resp.json()
+
+                    # OpenRouter returns images in different formats depending on the model.
+                    # Some return markdown ![image](data:...) in the content.
+                    # Some return separate content blocks.
+                    content = ""
+                    if data.get("choices"):
+                        message = data["choices"][0].get("message", {})
+                        content = message.get("content", "")
+
+                    # Check for inline data:image in content
+                    if "data:image" in content:
+                        import re
+                        match = re.search(r'(data:image/[^;]+;base64,[A-Za-z0-9+/=]+)', content)
+                        if match:
+                            return match.group(1)
+
+                    # Check for image_url in response (some models)
+                    if data.get("choices"):
+                        message = data["choices"][0].get("message", {})
+                        if isinstance(message, dict) and "content" in message:
+                            # Some models return a list of content blocks
+                            c = message["content"]
+                            if isinstance(c, list):
+                                for block in c:
+                                    if isinstance(block, dict) and block.get("type") == "image_url":
+                                        return block.get("image_url", {}).get("url", "")
+
+                    logger.warning(f"OpenRouter image gen returned no image. Content: {content[:200]}")
+                    return ""
+
+        except aiohttp.ClientError as e:
+            logger.error(f"OpenRouter image gen failed: {e}")
+            return ""
+        except Exception as e:
+            logger.error(f"Image gen error: {e}")
+            return ""
+
+    # ── Z.ai Sidecar: Generic request ──
 
     async def _sidecar_post(self, endpoint: str, data: dict, timeout: int = 60) -> Optional[dict]:
         """Send request to local Z.ai sidecar."""
@@ -141,6 +222,8 @@ class LLMHandler:
             logger.error(f"Sidecar error ({endpoint}): {e}")
             return None
 
+    # ── Z.ai Sidecar: Vision ──
+
     async def analyze_image(
         self, image_url: str = None, image_b64: str = None, prompt: str = "Describe this image in detail."
     ) -> str:
@@ -162,7 +245,9 @@ class LLMHandler:
             logger.error(f"Image analysis failed: {e}")
             return ""
 
-    async def generate_image(self, prompt: str, size: str = "1024x1024") -> str:
+    # ── Z.ai Sidecar: Image Generation ──
+
+    async def generate_image_sidecar(self, prompt: str, size: str = "1024x1024") -> str:
         """Generate an image via Z.ai sidecar. Returns base64 PNG or empty string."""
         try:
             result = await self._sidecar_post("/generate", {"prompt": prompt, "size": size}, timeout=120)
@@ -170,8 +255,10 @@ class LLMHandler:
                 return result["image_b64"]
             return ""
         except Exception as e:
-            logger.error(f"Image generation failed: {e}")
+            logger.error(f"Sidecar image generation failed: {e}")
             return ""
+
+    # ── Z.ai Sidecar: Web Search ──
 
     async def web_search(self, query: str, num: int = 5) -> list:
         """Search web via Z.ai sidecar. Returns list of result dicts."""
@@ -183,3 +270,187 @@ class LLMHandler:
         except Exception as e:
             logger.error(f"Web search failed: {e}")
             return []
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Module-level singleton
+# ═══════════════════════════════════════════════════════════════
+
+_llm_handler = LLMHandler()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Cog-compatible wrapper functions
+#  (cogs/chat.py and cogs/settings_cog.py import these by name)
+# ═══════════════════════════════════════════════════════════════
+
+async def generate_llm_response(system_prompt: str, messages: list) -> Optional[str]:
+    """
+    Wrapper for cogs. Takes system_prompt + messages list.
+    Messages may contain a system message with embedded 'model' key
+    (the cog embeds the model there for routing).
+    Returns the response content string, or None on failure.
+    """
+    model = None
+    clean_messages = []
+    actual_system_prompt = system_prompt
+
+    for msg in messages:
+        if msg.get("role") == "system":
+            # Extract model if embedded by the cog
+            if "model" in msg:
+                model = msg["model"]
+            # Use the system message content (may have memory context appended)
+            content = msg.get("content", "")
+            if content:
+                actual_system_prompt = content
+            # Don't add to clean_messages — system_prompt param handles it
+        else:
+            clean_messages.append(msg)
+
+    if not model:
+        model = "meta-llama/llama-4-maverick:free"
+
+    result = await _llm_handler.chat(
+        clean_messages,
+        model=model,
+        system_prompt=actual_system_prompt,
+    )
+    return result.get("content") if result else None
+
+
+async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Optional[str]:
+    """
+    Generate an image. Returns a data:image URL or a regular URL.
+
+    Supported model_name values:
+      - "zai-sidecar"    → Z.ai sidecar (free, local)
+      - "pollinations"   → Pollinations.ai (free, always works)
+      - any other string → OpenRouter with modalities (paid, best quality)
+    """
+    if model_name == "pollinations":
+        # Pollinations.ai — always free, no API key needed
+        try:
+            encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
+            url = (
+                f"https://image.pollinations.ai/prompt/"
+                f"{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
+            )
+            # Verify the URL is reachable
+            async with aiohttp.ClientSession() as session:
+                async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        return url
+            return url  # Return anyway — the image will be generated on fetch
+        except Exception as e:
+            logger.error(f"Pollinations failed: {e}")
+            return None
+
+    elif model_name == "zai-sidecar":
+        # Z.ai sidecar
+        b64 = await _llm_handler.generate_image_sidecar(prompt)
+        if b64:
+            return f"data:image/png;base64,{b64}"
+        logger.warning("Sidecar image gen returned nothing, falling back to Pollinations")
+        # Fallback to Pollinations
+        encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
+        return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
+
+    else:
+        # OpenRouter with modalities (model_name is an actual LLM model ID)
+        b64_or_url = await _llm_handler.generate_image_openrouter(prompt, model=model_name)
+        if b64_or_url:
+            return b64_or_url
+        logger.warning(f"OpenRouter image gen ({model_name}) failed, falling back to Pollinations")
+        encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
+        return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
+
+
+async def analyze_image_vision(image_url: str, prompt: str = "Describe this image in detail.") -> str:
+    """
+    Analyze an image via Z.ai sidecar vision endpoint.
+    Returns the description text, or empty string on failure.
+    """
+    return await _llm_handler.analyze_image(image_url=image_url, prompt=prompt)
+
+
+async def web_search_zai(query: str, num: int = 5) -> list:
+    """
+    Search the web via Z.ai sidecar.
+    Returns list of result dicts with 'url', 'name', 'snippet', etc.
+    """
+    return await _llm_handler.web_search(query, num=num)
+
+
+async def parse_settings_command(prompt: str):
+    """
+    Parse a natural language settings command using the LLM.
+    Returns a (key, value) tuple, or None if parsing fails.
+
+    Examples:
+      "switch model to gpt-4o"        → ("llm_model", "openai/gpt-4o")
+      "turn off responses"            → ("response_enabled", False)
+      "set cooldown to 15"            → ("cooldown_seconds", 15)
+      "switch to markov mode"         → ("brain_mode", "markov")
+    """
+    system_prompt = (
+        "You are a settings parser for a Discord bot. Given a user's natural language request, "
+        "extract the setting key and value.\n"
+        "Return ONLY a JSON object with exactly two fields: \"key\" and \"value\". "
+        "No other text, no markdown formatting.\n\n"
+        "Valid setting keys and their expected value types:\n"
+        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
+        "- brain_mode: string (\"markov\" or \"llm\")\n"
+        "- response_enabled: boolean\n"
+        "- learning_enabled: boolean\n"
+        "- cooldown_seconds: integer\n"
+        "- trigger_on_mention: boolean\n"
+        "- trigger_on_reply: boolean\n"
+        "- vision_enabled: boolean\n"
+        "- web_search_enabled: boolean\n"
+        "- image_model: string (\"zai-sidecar\", \"pollinations\", or a model ID)\n"
+        "- response_chance: float (0.0 to 1.0)\n"
+        "- personality_prefix: string\n"
+        "- markov_order: integer\n"
+        "- min_response_words: integer\n"
+        "- max_response_words: integer\n"
+        "- gif_chance: float (0.0 to 1.0)\n"
+        "- reaction_chance: float (0.0 to 1.0)\n"
+        "- random_reply_chance: float (0.0 to 1.0)\n"
+        "- random_mention_chance: float (0.0 to 1.0)\n"
+        "- indirect_reply_chance: float (0.0 to 1.0)\n"
+        "- learn_from_bots: boolean\n\n"
+        "Examples:\n"
+        "- \"switch model to gpt-4o\" → {\"key\": \"llm_model\", \"value\": \"openai/gpt-4o\"}\n"
+        "- \"turn off responses\" → {\"key\": \"response_enabled\", \"value\": false}\n"
+        "- \"set cooldown to 15\" → {\"key\": \"cooldown_seconds\", \"value\": 15}\n"
+        "- \"switch to markov mode\" → {\"key\": \"brain_mode\", \"value\": \"markov\"}\n"
+    )
+
+    result = await _llm_handler.chat(
+        [{"role": "user", "content": prompt}],
+        system_prompt=system_prompt,
+        temperature=0,
+        max_tokens=150,
+    )
+    if not result or not result.get("content"):
+        return None
+
+    try:
+        content = result["content"].strip()
+        # Strip markdown code fences if the LLM added them
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        parsed = json.loads(content)
+        key = parsed.get("key")
+        value = parsed.get("value")
+        if key and value is not None:
+            return (key, value)
+        return None
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.debug(f"Failed to parse settings command result: {e}")
+        return None

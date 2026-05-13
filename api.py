@@ -316,10 +316,16 @@ def create_api(bot_instance):
                 settings["personality"]["preset"] = preset_name
                 settings["personality"]["custom"] = ""
                 settings["personality"]["system_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
+                # FIX: Also set the flat key used by cogs/chat.py on_message handler
+                settings["personality_prompt"] = PERSONALITY_PRESETS[preset_name]["prompt"]
+                settings["personality_name"] = PERSONALITY_PRESETS[preset_name]["name"]
             elif custom_prompt:
                 settings["personality"]["preset"] = ""
                 settings["personality"]["custom"] = custom_prompt
                 settings["personality"]["system_prompt"] = custom_prompt
+                # FIX: Sync flat key for cog compat
+                settings["personality_prompt"] = custom_prompt
+                settings["personality_name"] = "Custom"
 
             await sm.save_settings(gid)
             return {"success": True, "personality": settings["personality"]}
@@ -339,7 +345,8 @@ def create_api(bot_instance):
             active = "meta-llama/llama-4-maverick:free"
             if sm and sm.settings:
                 gid = _resolve_guild_id(bot_instance, sm, guild_id)
-                active = sm.settings[gid].get("model", active)
+                # Read llm_model first (used by cogs), fall back to model (used by dashboard)
+                active = sm.settings[gid].get("llm_model") or sm.settings[gid].get("model", active)
             return {"active_model": active, "free_models": FREE_MODELS, "paid_models": PAID_MODELS}
         except HTTPException:
             raise
@@ -362,12 +369,16 @@ def create_api(bot_instance):
                 raise err
             gid_param = body.get("guild_id")
             # If guild_id specified, update only that guild; otherwise update all
+            # FIX: Sync both 'model' (dashboard) and 'llm_model' (cogs) so GUI
+            # changes actually take effect in message responses.
             if gid_param and gid_param in sm.settings:
                 sm.settings[gid_param]["model"] = model
+                sm.settings[gid_param]["llm_model"] = model
                 await sm.save_settings(gid_param)
             else:
                 for gid in sm.settings:
                     sm.settings[gid]["model"] = model
+                    sm.settings[gid]["llm_model"] = model
                     await sm.save_settings(gid)
             return {"success": True, "model": model}
         except HTTPException:

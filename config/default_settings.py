@@ -1,4 +1,5 @@
 # config/default_settings.py
+# Dripsletongue — Default settings for new guilds
 
 def is_bool(val):
     return str(val).lower() in ["true", "false", "yes", "no", "on", "off", "1", "0"]
@@ -127,6 +128,7 @@ PERSONALITY_PRESETS = {
 }
 
 DEFAULT_SETTINGS = {
+    # ── Core ──
     "brain_mode": "llm",
     "response_enabled": True,
     "learning_enabled": True,
@@ -138,29 +140,57 @@ DEFAULT_SETTINGS = {
     "allowed_channels": [],
     "ignored_users": [],
     "learn_from_bots": False,
+
+    # ── Triggers ──
     "trigger_on_mention": True,
     "trigger_on_reply": True,
     "conversation_window_seconds": 120,
     "indirect_reply_chance": 0.40,
+    "response_chance": 0.15,
+
+    # ── Response behavior ──
     "reaction_chance": 0.05,
     "random_reply_chance": 0.30,
     "random_mention_chance": 0.10,
     "gif_chance": 0.10,
     "personality_prefix": "",
-    "llm_model": "x-ai/grok-4.3",
-    "response_chance": 0.15,
+
+    # ── LLM Model ──
+    "llm_model": "meta-llama/llama-4-maverick:free",
+    "model": "meta-llama/llama-4-maverick:free",  # Dashboard API compat (synced with llm_model)
+
+    # ── Image Generation ──
     "image_model": "zai-sidecar",
+
+    # ── Personality ──
     "personality_prompt": "",
     "personality_name": "Ultron",
     "personality_avatar": "",
     "personality_status": "Observing.",
+    "personality": {},
 
-    # Z.ai Hybrid Integration Settings
+    # ── Z.ai Hybrid Integration ──
     "vision_enabled": True,
     "web_search_enabled": True,
     "zai_sidecar_url": "http://127.0.0.1:3456",
     "zai_image_gen_enabled": True,
+
+    # ── Auto Router (v5.7+) ──
+    "auto_router_enabled": False,
+    "auto_router_allowed_models": [],
+
+    # ── Markov fallback ──
+    "markov_enabled": True,
+
+    # ── Memory ──
+    "memory_enabled": True,
+
+    # ── Proactive messaging ──
+    "proactive_enabled": False,
 }
+
+# Backward-compat alias — settings_cog.py and settings_manager.py import DEFAULTS
+DEFAULTS = DEFAULT_SETTINGS
 
 VALIDATORS = {
     "brain_mode": is_valid_mode,
@@ -183,4 +213,8 @@ VALIDATORS = {
     "vision_enabled": is_bool,
     "web_search_enabled": is_bool,
     "zai_image_gen_enabled": is_bool,
+    "markov_enabled": is_bool,
+    "memory_enabled": is_bool,
+    "proactive_enabled": is_bool,
+    "auto_router_enabled": is_bool,
 }
