@@ -19,6 +19,19 @@ class SettingsCog(commands.Cog):
         self.db = db
         self.settings_manager = settings_manager
 
+    @staticmethod
+    def _format_setting_value(value, max_length=900):
+        if isinstance(value, (dict, list)):
+            display = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        else:
+            display = str(value)
+        display = display.replace("`", "'")
+        if not display:
+            display = "(empty)"
+        if len(display) > max_length:
+            display = display[: max_length - 3] + "..."
+        return f"`{display}`"
+
     group = app_commands.Group(
         name="botsettings",
         description="Configure the bot",
@@ -404,10 +417,28 @@ class SettingsCog(commands.Cog):
     @group.command(name="list", description="View all current settings")
     async def list_settings(self, interaction: discord.Interaction):
         settings = await self.settings_manager.get_settings(interaction.guild.id)
-        embed = discord.Embed(title="Bot Settings", color=discord.Color.blue())
-        for key, value in settings.items():
-            embed.add_field(name=key, value=f"`{value}`", inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        items = list(settings.items())
+        fields_per_page = 20
+        embeds = []
+
+        for start in range(0, len(items), fields_per_page):
+            page_items = items[start:start + fields_per_page]
+            page_number = len(embeds) + 1
+            total_pages = (len(items) + fields_per_page - 1) // fields_per_page
+            embed = discord.Embed(
+                title=f"Bot Settings ({page_number}/{total_pages})",
+                description=f"Showing {len(items)} configured setting(s).",
+                color=discord.Color.blue(),
+            )
+            for key, value in page_items:
+                embed.add_field(
+                    name=key[:256],
+                    value=self._format_setting_value(value),
+                    inline=False,
+                )
+            embeds.append(embed)
+
+        await interaction.response.send_message(embeds=embeds[:10], ephemeral=True)
 
     @group.command(name="stats", description="View learning statistics")
     async def stats(self, interaction: discord.Interaction):
