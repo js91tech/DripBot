@@ -98,7 +98,8 @@ class SettingsCog(commands.Cog):
             return
         activity = discord.Game(name=clean_text) if clean_text else None
         await self.bot.change_presence(activity=activity)
-        await self.settings_manager.set_setting(interaction.guild.id, "personality_status", clean_text)
+        for guild in self.bot.guilds:
+            await self.settings_manager.set_setting(guild.id, "personality_status", clean_text)
         await interaction.response.send_message(
             f"Bot status updated to `{clean_text}`." if clean_text else "Bot status cleared.",
             ephemeral=True,

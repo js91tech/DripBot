@@ -90,6 +90,7 @@ if sidecar_process:
 
 from engine.database import Database
 from config.settings_manager import SettingsManager
+from config.default_settings import DEFAULTS
 
 db = Database()
 settings_manager = SettingsManager(db)
@@ -112,11 +113,18 @@ async def on_ready():
     await db.init()
 
     # Pre-load settings for all guilds
-    saved_status = ""
+    saved_statuses = []
     for guild in bot.guilds:
         settings = await settings_manager.get_settings(guild.id)
-        if not saved_status:
-            saved_status = settings.get("personality_status", "")
+        status_text = str(settings.get("personality_status", "")).strip()
+        if status_text:
+            saved_statuses.append(status_text)
+
+    default_status = DEFAULTS.get("personality_status", "")
+    saved_status = next(
+        (status_text for status_text in saved_statuses if status_text != default_status),
+        saved_statuses[0] if saved_statuses else "",
+    )
 
     if saved_status:
         try:

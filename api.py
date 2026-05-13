@@ -6,6 +6,8 @@ Endpoints:
   GET  /api/guilds           -> list of guilds the bot is in (for server selector)
   GET  /api/profile          -> bot username, avatar, guild count
   POST /api/profile          -> upload new avatar (updates Discord too)
+  GET  /api/status           -> current bot activity status
+  POST /api/status           -> update bot activity status
   GET  /api/personality      -> active preset + custom prompt
   POST /api/personality      -> set preset by name or custom prompt
   GET  /api/models           -> active model + free/paid lists
@@ -26,6 +28,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from config.default_settings import (
+    DEFAULTS,
     build_personality_settings_update,
     normalize_personality_preset,
 )
@@ -110,6 +113,45 @@ def _get_activity_name(bot_instance) -> str:
     return getattr(activity, "name", "") or ""
 
 
+def _get_saved_status(bot_instance, sm) -> str:
+    """Return a saved global status, preferring custom values over the default."""
+    default_status = DEFAULTS.get("personality_status", "")
+    statuses = []
+    for guild in getattr(bot_instance, "guilds", []):
+        for gid in (guild.id, str(guild.id)):
+            if gid in sm.settings:
+                status = str(sm.settings[gid].get("personality_status", "")).strip()
+                if status:
+                    statuses.append(status)
+                break
+    if not statuses:
+        statuses = [
+            str(settings.get("personality_status", "")).strip()
+            for settings in sm.settings.values()
+            if str(settings.get("personality_status", "")).strip()
+        ]
+    return next((status for status in statuses if status != default_status), statuses[0] if statuses else "")
+
+
+async def _save_status_to_all_guilds(sm, status_text: str):
+    """Persist the bot's global Discord status in every cached guild setting."""
+    for gid in list(sm.settings.keys()):
+        sm.settings[gid]["personality_status"] = status_text
+        await sm.save_settings(gid)
+
+
+def _apply_discord_status(bot_instance, status_text: str):
+    """Apply Discord presence from the dashboard thread."""
+    import discord
+
+    activity = discord.Game(name=status_text) if status_text else None
+    future = asyncio.run_coroutine_threadsafe(
+        bot_instance.change_presence(activity=activity),
+        bot_instance.loop,
+    )
+    future.result(timeout=15)
+
+
 def create_api(bot_instance):
     """Create and configure the FastAPI app."""
     app = FastAPI(title="Dripsletongue API")
@@ -157,8 +199,7 @@ def create_api(bot_instance):
             status_text = _get_activity_name(bot_instance)
             sm = getattr(bot_instance, "settings_manager", None)
             if sm and sm.settings:
-                gid = _resolve_guild_id(bot_instance, sm, guild_id)
-                status_text = sm.settings[gid].get("personality_status", status_text)
+                status_text = status_text or _get_saved_status(bot_instance, sm)
             return {
                 "username": str(user),
                 "id": str(user.id),
@@ -223,27 +264,14 @@ def create_api(bot_instance):
                     raise HTTPException(400, detail="Status must be 128 characters or fewer")
 
                 try:
-                    import discord
-
-                    activity = discord.Game(name=clean_status) if clean_status else None
-                    future = asyncio.run_coroutine_threadsafe(
-                        bot_instance.change_presence(activity=activity), loop
-                    )
-                    future.result(timeout=15)
+                    _apply_discord_status(bot_instance, clean_status)
                 except Exception as discord_err:
                     logger.error(f"Discord status update failed: {discord_err}", exc_info=True)
                     raise HTTPException(500, detail=f"Discord rejected status: {discord_err}")
 
                 sm = getattr(bot_instance, "settings_manager", None)
                 if sm and sm.settings:
-                    if guild_id:
-                        gid = _resolve_guild_id(bot_instance, sm, guild_id)
-                        sm.settings[gid]["personality_status"] = clean_status
-                        await sm.save_settings(gid)
-                    else:
-                        for gid in sm.settings:
-                            sm.settings[gid]["personality_status"] = clean_status
-                            await sm.save_settings(gid)
+                    await _save_status_to_all_guilds(sm, clean_status)
                 result["status_text"] = clean_status
 
             return result
@@ -251,6 +279,46 @@ def create_api(bot_instance):
             raise
         except Exception as e:
             logger.error(f"Profile update error: {e}", exc_info=True)
+            raise HTTPException(500, detail=str(e))
+
+    # -- Bot Status --
+    @app.get("/api/status")
+    async def get_status():
+        try:
+            status_text = _get_activity_name(bot_instance)
+            sm = getattr(bot_instance, "settings_manager", None)
+            if sm and sm.settings:
+                status_text = status_text or _get_saved_status(bot_instance, sm)
+            return {"status_text": status_text}
+        except Exception as e:
+            logger.error(f"Status get error: {e}", exc_info=True)
+            raise HTTPException(500, detail=str(e))
+
+    @app.post("/api/status")
+    async def update_status(request: Request):
+        try:
+            body = await request.json()
+            raw_status = body.get("status", "")
+            if raw_status is None:
+                raw_status = ""
+            clean_status = str(raw_status).strip()
+            if len(clean_status) > 128:
+                raise HTTPException(400, detail="Status must be 128 characters or fewer")
+
+            try:
+                _apply_discord_status(bot_instance, clean_status)
+            except Exception as discord_err:
+                logger.error(f"Discord status update failed: {discord_err}", exc_info=True)
+                raise HTTPException(500, detail=f"Discord rejected status: {discord_err}")
+
+            sm = getattr(bot_instance, "settings_manager", None)
+            if sm and sm.settings:
+                await _save_status_to_all_guilds(sm, clean_status)
+            return {"success": True, "status_text": clean_status}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Status update error: {e}", exc_info=True)
             raise HTTPException(500, detail=str(e))
 
     # -- Personality --
