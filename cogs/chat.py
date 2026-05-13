@@ -1,4 +1,6 @@
 import os
+import io
+import base64
 import discord
 from discord.ext import commands, tasks
 import random
@@ -9,11 +11,8 @@ from datetime import timedelta
 from discord.utils import utcnow
 from engine.markov import MarkovChain
 from utils import sanitize_message, search_gif
-from llm import generate_llm_response, generate_image
+from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 
-# ==========================================
-# PERSONALITY SYSTEM
-# ==========================================
 BASE_SECRET_PROMPT = (
     "You are a highly intelligent but insufferably sarcastic human in a Discord server. You are NOT an AI assistant. "
     "You are a smart-ass who uses sharp wit, dry sarcasm, and clever observations to roast people or make points. "
@@ -62,9 +61,6 @@ FALLBACK_QUOTES = [
     "are we really doing this again",
 ]
 
-# ==========================================
-# IMAGE TRIGGER WORDS (must be specific to avoid false positives)
-# ==========================================
 IMAGE_TRIGGER_WORDS = [
     "imagine", "generate image", "create image", "make image",
     "draw", "paint", "illustrate", "render image",
@@ -73,7 +69,6 @@ IMAGE_TRIGGER_WORDS = [
     "text to image", "txt2img", "t2i",
 ]
 
-# Anti-hallucination: words that users say that do NOT mean "make an image"
 IMAGE_FALSE_POSITIVES = [
     "imagine that", "imagine if", "i can imagine", "just imagine",
     "imagine being", "imagine having", "hard to imagine", "imagine this",
@@ -89,7 +84,6 @@ class Chat(commands.Cog):
         self.bot = bot
         self.db = db
         self.settings_manager = settings_manager
-
         self.chains = {}
         self.channel_counters = {}
         self.channel_cooldowns = {}
@@ -106,18 +100,12 @@ class Chat(commands.Cog):
         self.proactive_loop.cancel()
         self.memory_consolidation_loop.cancel()
 
-    # ==========================================
-    # FUZZY DEDUP
-    # ==========================================
     def _is_fuzzy_duplicate(self, text, guild_id):
-        """Check if text is >70% word-overlap with any recent bot message (window 8)."""
         text_words = set(text.lower().split())
         if len(text_words) < 3:
             return False
-
         recent = self.bot_recent_messages.get(guild_id, [])
         recent_window = recent[-FUZZY_DEDUP_WINDOW:]
-
         for past_msg in recent_window:
             past_words = set(past_msg.lower().split())
             if len(past_words) < 3:
@@ -127,53 +115,85 @@ class Chat(commands.Cog):
                 return True
         return False
 
-    # ==========================================
-    # IMAGE TRIGGER DETECTION
-    # ==========================================
     def _is_image_request(self, message_content):
-        """
-        Check if a message is requesting image generation.
-        Returns the cleaned prompt if yes, None if no.
-        """
         clean = re.sub(r'<@!?\d+>', '', message_content).strip()
         clean_lower = clean.lower().strip()
-
-        # Check false positives first (things that sound like "imagine" but aren't requests)
         for fp in IMAGE_FALSE_POSITIVES:
             if fp in clean_lower:
                 return None
-
-        # Check for explicit image trigger words
         is_image = False
         for trigger in IMAGE_TRIGGER_WORDS:
             if trigger in clean_lower:
                 is_image = True
                 break
-
         if not is_image:
             return None
-
-        # Anti-hallucination: the message must contain a description
-        # If the entire message is just "imagine" or "generate image" with no subject, skip
-        # Strip out the trigger phrase and check what's left
         remaining = clean_lower
         for trigger in IMAGE_TRIGGER_WORDS:
             remaining = remaining.replace(trigger, "").strip()
-
-        # Remove common filler words
         filler_words = ["a", "an", "the", "of", "for", "me", "please", "can", "you",
                         "could", "would", "something", "some", "this", "that"]
         remaining_words = [w for w in remaining.split() if w not in filler_words]
-
         if len(remaining_words) < 2:
             return None
-
-        # Return the original cleaned prompt (with trigger words included for context)
         return clean
 
-    # ==========================================
-    # PROACTIVE LOOP
-    # ==========================================
+    # FIX #1: Vision - analyze image attachments
+    async def _get_image_context(self, message):
+        if not message.attachments:
+            return None
+        settings = await self.settings_manager.get_settings(message.guild.id)
+        if not settings.get("vision_enabled", True):
+            return None
+        image_urls = []
+        for att in message.attachments:
+            if att.content_type and "image" in att.content_type:
+                image_urls.append(att.url)
+        if not image_urls:
+            return None
+        try:
+            description = await analyze_image_vision(
+                image_urls[0],
+                prompt="Briefly describe what's in this image in 1-2 sentences. Focus on the main subject."
+            )
+            if description:
+                print(f"[VISION] Analyzed image: {description[:80]}...")
+                return description
+        except Exception as e:
+            print(f"[VISION] Error analyzing image: {e}")
+        return None
+
+    # FIX #1: Web Search - now takes message object (not string)
+    async def _enrich_with_search(self, message):
+        settings = await self.settings_manager.get_settings(message.guild.id)
+        if not settings.get("web_search_enabled", True):
+            return None
+        search_keywords = [
+            "what is", "who is", "when was", "where is", "how much",
+            "latest", "current", "today", "news", "price of",
+            "define", "meaning of", "explain",
+        ]
+        msg_lower = message.content.lower()
+        if not any(kw in msg_lower for kw in search_keywords):
+            return None
+        clean = re.sub(r'<@!?\d+>', '', message.content).strip()
+        query = re.sub(r'^(can you|could you|what is|who is|when was|where is|how much|tell me about|explain)\s*', '', clean, flags=re.IGNORECASE).strip()
+        query = query.rstrip('?!.').strip()
+        if len(query) < 3:
+            return None
+        try:
+            results = await web_search_zai(query, num=3)
+            if results:
+                snippets = [f"- {r['snippet']}" for r in results[:2] if r.get('snippet')]
+                if snippets:
+                    context = f"[Web context: {' '.join(snippets)}]"
+                    print(f"[SEARCH] Found context for: {query[:50]}...")
+                    return context
+        except Exception as e:
+            print(f"[SEARCH] Error: {e}")
+        return None
+
+    # FIX #4: Proactive loop - fixed stale-channel continue (was no-op in inner loop)
     @tasks.loop(minutes=90)
     async def proactive_loop(self):
         await self.bot.wait_until_ready()
@@ -194,9 +214,9 @@ class Chat(commands.Cog):
             if not target_channel:
                 continue
             try:
-                async for last_msg in target_channel.history(limit=1):
-                    if (utcnow() - last_msg.created_at).total_seconds() > 7200:
-                        continue
+                last_msgs = [m async for m in target_channel.history(limit=1)]
+                if not last_msgs or (utcnow() - last_msgs[0].created_at).total_seconds() > 7200:
+                    continue
             except Exception:
                 continue
             chat_history = []
@@ -207,8 +227,7 @@ class Chat(commands.Cog):
                 if msg.author == self.bot.user:
                     chat_history.insert(0, {"role": "assistant", "content": clean_msg_content})
                 else:
-                    chat_history.insert(
-                        0, {"role": "user", "content": f"{msg.author.display_name}: {clean_msg_content}"})
+                    chat_history.insert(0, {"role": "user", "content": f"{msg.author.display_name}: {clean_msg_content}"})
             if len(chat_history) < 10:
                 continue
             prompt = (
@@ -227,9 +246,6 @@ class Chat(commands.Cog):
                 except Exception:
                     pass
 
-    # ==========================================
-    # MEMORY CONSOLIDATION
-    # ==========================================
     @tasks.loop(hours=24)
     async def memory_consolidation_loop(self):
         await self.bot.wait_until_ready()
@@ -255,8 +271,7 @@ class Chat(commands.Cog):
                 if msg.author == self.bot.user:
                     chat_history.insert(0, {"role": "assistant", "content": clean_msg_content})
                 else:
-                    chat_history.insert(
-                        0, {"role": "user", "content": f"{msg.author.display_name}: {clean_msg_content}"})
+                    chat_history.insert(0, {"role": "user", "content": f"{msg.author.display_name}: {clean_msg_content}"})
             if len(chat_history) < 50:
                 continue
             prompt = (
@@ -270,9 +285,6 @@ class Chat(commands.Cog):
             if summary:
                 await self.db.save_consolidated_memory(guild.id, {"summary": summary, "timestamp": time.time()})
 
-    # ==========================================
-    # MARKOV HELPERS
-    # ==========================================
     async def get_chain(self, guild_id, order):
         if guild_id not in self.chains:
             self.chains[guild_id] = MarkovChain(order=order)
@@ -302,9 +314,6 @@ class Chat(commands.Cog):
             self.bot_recent_messages[guild_id] = self.bot_recent_messages[guild_id][-20:]
         return response
 
-    # ==========================================
-    # GUILD JOIN (training data)
-    # ==========================================
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         stats = await self.db.get_stats(guild.id)
@@ -323,12 +332,8 @@ class Chat(commands.Cog):
             except Exception as e:
                 print(f"Training data load failed for guild {guild.id}: {e}")
 
-    # ==========================================
-    # MAIN MESSAGE HANDLER
-    # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # --- OWNER DM PROXY ---
         if isinstance(message.channel, discord.DMChannel):
             owner_id = int(os.getenv("OWNER_USER_ID", "0"))
             if owner_id != 0 and message.author.id == owner_id and message.content:
@@ -363,7 +368,6 @@ class Chat(commands.Cog):
         if is_bot and not settings["learn_from_bots"]:
             return
 
-        # --- LEARNING ---
         if settings["learning_enabled"] and not message.content.startswith("/"):
             chain = await self.get_chain(guild_id, settings["markov_order"])
             chain.learn(message.content)
@@ -379,69 +383,64 @@ class Chat(commands.Cog):
         if not settings["response_enabled"]:
             return
 
-        # ==========================================
-        # IMAGE GENERATION CHECK (before normal triggers)
-        # ==========================================
+        # IMAGE GENERATION CHECK
         image_prompt = self._is_image_request(message.content)
         if image_prompt and is_mentioned_or_replied(self.bot.user, message, settings):
-            # Check cooldown
             if channel_id in self.channel_cooldowns:
                 if time.time() - self.channel_cooldowns[channel_id] < settings["cooldown_seconds"]:
-                    # Cooldown active - fall through to normal response
                     image_prompt = None
                 else:
-                    # Generate image
-                    image_model = settings.get("image_model", "openai/gpt-4o")
+                    image_model = settings.get("image_model", "zai-sidecar")
                     print(f"[IMAGE] Generating image with model={image_model}, prompt=\"{image_prompt[:80]}\"")
-
                     async with message.channel.typing():
                         image_url = await generate_image(image_prompt, model_name=image_model)
-
+                    # FIX #3: Handle base64 data URLs from Z.ai sidecar
                     if image_url:
                         try:
-                            await message.channel.send(image_url, reference=message)
+                            if image_url.startswith("data:image/"):
+                                header, encoded = image_url.split(",", 1)
+                                ext = header.split("/")[1].split(";")[0]
+                                img_data = base64.b64decode(encoded)
+                                img_file = discord.File(io.BytesIO(img_data), f"image.{ext}")
+                                await message.channel.send(file=img_file, reference=message)
+                            else:
+                                await message.channel.send(image_url, reference=message)
                             self.channel_cooldowns[channel_id] = time.time()
                             await self.db.increment_stat(guild_id, "messages_sent")
-                            # Track in recent messages to avoid dedup
                             if guild_id not in self.bot_recent_messages:
                                 self.bot_recent_messages[guild_id] = []
                             self.bot_recent_messages[guild_id].append(f"[IMAGE] {image_prompt[:50]}")
                             self.bot_recent_messages[guild_id] = self.bot_recent_messages[guild_id][-20:]
-                            print(f"[IMAGE] Successfully sent image")
+                            print("[IMAGE] Successfully sent image")
                             return
                         except discord.errors.HTTPException as e:
                             print(f"[IMAGE] Failed to send: {e}")
                     else:
-                        print(f"[IMAGE] Generation returned None")
-
-                    # If image failed, fall through to normal text response
+                        print("[IMAGE] Generation returned None")
                     image_prompt = None
 
-        # --- MESSAGE COUNTING (4-10 Random Goal) ---
+        # MESSAGE COUNTING
         if channel_id not in self.channel_counters:
             self.channel_counters[channel_id] = 0
         self.channel_counters[channel_id] += 1
-
         if channel_id not in self.channel_message_goals:
             self.channel_message_goals[channel_id] = random.randint(4, 10)
-
         if channel_id not in self.recent_timestamps:
             self.recent_timestamps[channel_id] = deque(maxlen=50)
         self.recent_timestamps[channel_id].append(time.time())
 
-        # --- TRIGGER LOGIC ---
+        # TRIGGER LOGIC
         should_respond = False
         is_mentioned = self.bot.user.mentioned_in(message)
         is_reply_to_bot = (message.reference and message.reference.resolved and
                            message.reference.resolved.author == self.bot.user)
 
-        # 1. Check Direct Triggers
         if is_mentioned and settings["trigger_on_mention"]:
             should_respond = True
         elif is_reply_to_bot and settings["trigger_on_reply"]:
             should_respond = True
 
-        # 2. Check Indirect Reply (Engagement Window)
+        # FIX #5: Check response_chance for non-direct triggers
         if not should_respond:
             window_seconds = settings.get("conversation_window_seconds", 120)
             indirect_chance = settings.get("indirect_reply_chance", 0.40)
@@ -453,18 +452,19 @@ class Chat(commands.Cog):
                 if random.random() < chance:
                     should_respond = True
 
-        # 3. Check 4-10 Counter
+        # FIX #5: response_chance gates count-based triggers
         if not should_respond:
-            if self.channel_counters[channel_id] >= self.channel_message_goals[channel_id]:
-                should_respond = True
+            response_chance = settings.get("response_chance", 0.15)
+            if random.random() < response_chance:
+                if self.channel_counters[channel_id] >= self.channel_message_goals[channel_id]:
+                    should_respond = True
 
-        # 4. APPLY COOLDOWN TO ALL TRIGGERS
         if should_respond:
             if channel_id in self.channel_cooldowns:
                 if time.time() - self.channel_cooldowns[channel_id] < settings["cooldown_seconds"]:
                     should_respond = False
 
-        # --- EXECUTE RESPONSE ---
+        # EXECUTE RESPONSE
         if should_respond:
             if random.random() < settings["reaction_chance"]:
                 emoji_options = ['💀', '😭', '🔥', '💯', '🤣', '🙄', '👀', '🫡', '🤨']
@@ -478,6 +478,9 @@ class Chat(commands.Cog):
                     pass
 
             async with message.channel.typing():
+                image_description = await self._get_image_context(message)
+                web_context = await self._enrich_with_search(message)
+
                 use_reply = is_mentioned or is_reply_to_bot or (random.random() < settings["random_reply_chance"])
                 use_mention = (random.random() < settings["random_mention_chance"])
                 use_gif = (random.random() < settings["gif_chance"])
@@ -515,11 +518,16 @@ class Chat(commands.Cog):
                                 continue
                         chat_history.insert(0, {"role": role, "content": content_payload})
 
-                    # Insert trigger message at end
                     clean_trigger_content = re.sub(r'<@!?\d+>', '', message.content).strip()
                     trigger_payload = []
-                    text_part = f"{message.author.display_name}: {clean_trigger_content if clean_trigger_content else 'sent an image'}"
-                    trigger_payload.append({"type": "text", "text": text_part})
+                    trigger_text = f"{message.author.display_name}: {clean_trigger_content if clean_trigger_content else 'sent an image'}"
+
+                    if image_description:
+                        trigger_text += f" [The user sent an image: {image_description}]"
+                    if web_context:
+                        trigger_text += f" {web_context}"
+
+                    trigger_payload.append({"type": "text", "text": trigger_text})
                     for att in message.attachments:
                         if att.content_type and "image" in att.content_type:
                             trigger_payload.append({"type": "image_url", "image_url": {"url": att.url}})
@@ -528,7 +536,6 @@ class Chat(commands.Cog):
                     user_memories = await self.db.get_memories(guild_id, message.author.id)
                     consolidated = await self.db.get_consolidated_memory(guild_id)
 
-                    # Build dynamic prompt with optional personality override
                     dynamic_prompt = settings.get("personality_prompt", "") or BASE_SECRET_PROMPT
                     if consolidated and consolidated.get("summary"):
                         dynamic_prompt += f"\n\nCONTEXT OF SERVER CULTURE:\n{consolidated['summary']}\nUse this subtly."
@@ -543,16 +550,12 @@ class Chat(commands.Cog):
                     if llm_response:
                         llm_response = re.sub(r'^.{0,30}?:\s*', '', llm_response).strip()
                         llm_response = re.sub(r'<@!?\d+>', '', llm_response).strip()
-
-                        # Fuzzy dedup check
                         if self._is_fuzzy_duplicate(llm_response, guild_id):
-                            print(f"[DEDUP] Blocked fuzzy duplicate response")
+                            print("[DEDUP] Blocked fuzzy duplicate response")
                             llm_response = None
-
                         if llm_response:
                             base_text = sanitize_message(llm_response)
                             final_content = f"{message.author.mention} {base_text}" if use_mention else base_text
-                            # Track for dedup
                             if guild_id not in self.bot_recent_messages:
                                 self.bot_recent_messages[guild_id] = []
                             self.bot_recent_messages[guild_id].append(llm_response.lower().strip())
@@ -574,7 +577,7 @@ class Chat(commands.Cog):
                         else:
                             final_content = random.choice(FALLBACK_QUOTES)
 
-                else:  # Markov / Gif mode
+                else:
                     if use_gif:
                         search_words = [w for w in message.content.lower().split() if len(w) > 3]
                         search_query = random.choice(search_words) if search_words else "meme"
@@ -610,7 +613,6 @@ class Chat(commands.Cog):
 
 
 def is_mentioned_or_replied(bot_user, message, settings):
-    """Check if the bot was mentioned or replied to in the message."""
     is_mentioned = bot_user.mentioned_in(message)
     is_reply_to_bot = (message.reference and message.reference.resolved and
                        message.reference.resolved.author == bot_user)

@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from config.default_settings import DEFAULTS, VALIDATORS
+from config.default_settings import DEFAULTS, VALIDATORS, PERSONALITY_PRESETS
 from engine.markov import MarkovChain
 from utils import sanitize_message
 from llm import generate_llm_response, parse_settings_command
@@ -26,11 +26,8 @@ class SettingsCog(commands.Cog):
     @group.command(name="ask", description="Change settings using natural language")
     @app_commands.describe(prompt="Describe what setting you want to change")
     async def ask_setting(self, interaction: discord.Interaction, prompt: str):
-        """Parse natural language and update a setting."""
         await interaction.response.defer(thinking=True)
-
         result = await parse_settings_command(prompt)
-
         if not result:
             await interaction.followup.send(
                 "I couldn't understand what setting you wanted to change. "
@@ -42,10 +39,8 @@ class SettingsCog(commands.Cog):
                 ephemeral=True,
             )
             return
-
         key, value = result
         guild_id = interaction.guild.id
-
         try:
             settings = await self.settings_manager.set_setting(guild_id, key, value)
             await interaction.followup.send(f"Updated `{key}` to `{value}`", ephemeral=True)
@@ -53,23 +48,69 @@ class SettingsCog(commands.Cog):
             await interaction.followup.send(f"Failed to update setting: {e}", ephemeral=True)
 
     # ==========================================
+    # /botsettings personality - Quick personality preset picker
+    # ==========================================
+    @group.command(name="personality", description="Switch the bot's personality preset")
+    @app_commands.describe(preset="Choose a personality preset")
+    @app_commands.choices(preset=[
+        app_commands.Choice(name="Ultron (Sarcastic Smart-Ass)", value="ultron"),
+        app_commands.Choice(name="Deadpool (Chaotic 4th-Wall)", value="deadpool"),
+        app_commands.Choice(name="J.A.R.V.I.S. (British Butler)", value="jarvis"),
+        app_commands.Choice(name="Tony Stark (Arrogant Genius)", value="tony_stark"),
+        app_commands.Choice(name="GLaDOS (Passive-Aggressive)", value="glados"),
+        app_commands.Choice(name="Rick Sanchez (Drunk Genius)", value="rick_sanchez"),
+        app_commands.Choice(name="Bender (Rude Robot)", value="bender"),
+        app_commands.Choice(name="The Brain (Megalomaniac)", value="the_brain"),
+    ])
+    async def personality_switch(self, interaction: discord.Interaction, preset: app_commands.Choice[str]):
+        preset_data = PERSONALITY_PRESETS.get(preset.value)
+        if not preset_data:
+            await interaction.response.send_message("Unknown preset.", ephemeral=True)
+            return
+        await self.settings_manager.update_settings(interaction.guild.id, {
+            "personality_prompt": preset_data["prompt"],
+            "personality_name": preset_data.get("name", preset.value),
+        })
+        await interaction.response.send_message(
+            f"Personality switched to **{preset_data['name']}**!",
+            ephemeral=True,
+        )
+
+    # ==========================================
     # /botsettings model - Quick LLM model picker
     # ==========================================
     @group.command(name="model", description="Quick-switch the LLM model")
     @app_commands.describe(model="Choose an LLM model")
     @app_commands.choices(model=[
+        # Free
         app_commands.Choice(name="Llama 3 8B (Free)", value="meta-llama/llama-3-8b-instruct"),
-        app_commands.Choice(name="Llama 3.1 70B", value="meta-llama/llama-3.1-70b-instruct"),
         app_commands.Choice(name="Llama 3.1 8B (Free)", value="meta-llama/llama-3.1-8b-instruct"),
+        app_commands.Choice(name="Llama 3.1 70B (Free)", value="meta-llama/llama-3.1-70b-instruct"),
+        app_commands.Choice(name="Llama 3.1 405B (Free)", value="meta-llama/llama-3.1-405b-instruct"),
+        app_commands.Choice(name="Gemini 2.0 Flash (Free)", value="google/gemini-2.0-flash-exp:free"),
+        app_commands.Choice(name="Gemini 2.0 Thinking (Free)", value="google/gemini-2.0-flash-thinking-exp:free"),
+        app_commands.Choice(name="Mistral 7B (Free)", value="mistralai/mistral-7b-instruct:free"),
+        app_commands.Choice(name="Qwen 2 7B (Free)", value="qwen/qwen-2-7b-instruct"),
+        app_commands.Choice(name="Zephyr 7B (Free)", value="huggingfaceh4/zephyr-7b-beta:free"),
+        app_commands.Choice(name="OpenChat 7B (Free)", value="openchat/openchat-7b:free"),
+        # Paid
+        app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
+        app_commands.Choice(name="GPT-4o Mini", value="openai/gpt-4o-mini"),
+        app_commands.Choice(name="GPT-4 Turbo", value="openai/gpt-4-turbo"),
         app_commands.Choice(name="Claude 3.5 Sonnet", value="anthropic/claude-3.5-sonnet"),
         app_commands.Choice(name="Claude 3.7 Sonnet", value="anthropic/claude-3.7-sonnet"),
-        app_commands.Choice(name="GPT-4o Mini", value="openai/gpt-4o-mini"),
-        app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
-        app_commands.Choice(name="Gemini 2.0 Flash (Free)", value="google/gemini-2.0-flash-exp:free"),
+        app_commands.Choice(name="Claude 3 Opus", value="anthropic/claude-3-opus"),
+        app_commands.Choice(name="Claude 3 Haiku", value="anthropic/claude-3-haiku"),
+        app_commands.Choice(name="Gemini Pro 1.5", value="google/gemini-pro-1.5"),
         app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large"),
-        app_commands.Choice(name="Hermes 3 70B", value="nousresearch/nous-hermes-2-mixtral-8x7b-dpo"),
         app_commands.Choice(name="DeepSeek V3", value="deepseek/deepseek-chat"),
+        app_commands.Choice(name="DeepSeek R1", value="deepseek/deepseek-r1"),
         app_commands.Choice(name="Qwen 2.5 72B", value="qwen/qwen-2.5-72b-instruct"),
+        app_commands.Choice(name="Hermes 3 70B", value="nousresearch/nous-hermes-2-mixtral-8x7b-dpo"),
+        app_commands.Choice(name="Command R+", value="cohere/command-r-plus"),
+        app_commands.Choice(name="Dolphin 70B", value="cognitivecomputations/dolphin-70b"),
+        app_commands.Choice(name="WizardLM 2 8x22B", value="microsoft/wizardlm-2-8x22b"),
+        app_commands.Choice(name="Yi Large", value="01-ai/yi-large"),
     ])
     async def model_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
@@ -84,6 +125,7 @@ class SettingsCog(commands.Cog):
     @group.command(name="imgmodel", description="Switch the image generation model")
     @app_commands.describe(model="Choose an image generation model")
     @app_commands.choices(model=[
+        app_commands.Choice(name="Z.ai Sidecar (Free)", value="zai-sidecar"),
         app_commands.Choice(name="GPT-4o (Best Quality)", value="openai/gpt-4o"),
         app_commands.Choice(name="GPT-4o Mini (Cheaper)", value="openai/gpt-4o-mini"),
         app_commands.Choice(name="Claude 3.5 Sonnet", value="anthropic/claude-3.5-sonnet"),
@@ -101,8 +143,7 @@ class SettingsCog(commands.Cog):
     # ==========================================
     # STANDARD SETTING COMMANDS
     # ==========================================
-    async def setting_autocomplete(self, interaction: discord.Interaction,
-                                   current: str) -> list[app_commands.Choice[str]]:
+    async def setting_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
         keys = list(DEFAULTS.keys())
         return [app_commands.Choice(name=key, value=key) for key in keys if current.lower() in key.lower()][:25]
 
@@ -143,7 +184,10 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="Learning Enabled", value="learning_enabled"),
         app_commands.Choice(name="Learn From Bots", value="learn_from_bots"),
         app_commands.Choice(name="Trigger on Mention", value="trigger_on_mention"),
-        app_commands.Choice(name="Trigger on Reply", value="trigger_on_reply")
+        app_commands.Choice(name="Trigger on Reply", value="trigger_on_reply"),
+        app_commands.Choice(name="Vision (Z.ai)", value="vision_enabled"),
+        app_commands.Choice(name="Web Search (Z.ai)", value="web_search_enabled"),
+        app_commands.Choice(name="Z.ai Image Gen", value="zai_image_gen_enabled"),
     ])
     async def toggle_setting(self, interaction: discord.Interaction, setting: app_commands.Choice[str]):
         settings = await self.settings_manager.get_settings(interaction.guild.id)
@@ -155,11 +199,16 @@ class SettingsCog(commands.Cog):
     @group.command(name="chattiness", description="Quick adjust how chatty the bot is")
     @app_commands.describe(level="Select a chattiness level")
     @app_commands.choices(level=[
-        app_commands.Choice(name="1 - Almost Never Speaks", value=1), app_commands.Choice(name="2", value=2),
-        app_commands.Choice(name="3 - Occasional", value=3), app_commands.Choice(name="4", value=4),
-        app_commands.Choice(name="5 - Average", value=5), app_commands.Choice(name="6", value=6),
-        app_commands.Choice(name="7 - Fairly Chatty", value=7), app_commands.Choice(name="8", value=8),
-        app_commands.Choice(name="9", value=9), app_commands.Choice(name="10 - Won't Shut Up", value=10)
+        app_commands.Choice(name="1 - Almost Never Speaks", value=1),
+        app_commands.Choice(name="2", value=2),
+        app_commands.Choice(name="3 - Occasional", value=3),
+        app_commands.Choice(name="4", value=4),
+        app_commands.Choice(name="5 - Average", value=5),
+        app_commands.Choice(name="6", value=6),
+        app_commands.Choice(name="7 - Fairly Chatty", value=7),
+        app_commands.Choice(name="8", value=8),
+        app_commands.Choice(name="9", value=9),
+        app_commands.Choice(name="10 - Won't Shut Up", value=10),
     ])
     async def chattiness(self, interaction: discord.Interaction, level: app_commands.Choice[int]):
         chance = round(level.value * 0.03, 2)
@@ -169,11 +218,11 @@ class SettingsCog(commands.Cog):
             ephemeral=True,
         )
 
-    @group.command(name="mode", description="Switch between Markov (Free/Silly) and LLM (Cheap/Coherent)")
+    @group.command(name="mode", description="Switch between Markov and LLM")
     @app_commands.describe(brain="Select the brain mode")
     @app_commands.choices(brain=[
         app_commands.Choice(name="Markov (Free, Silly, Random)", value="markov"),
-        app_commands.Choice(name="LLM (Costs Cents, Human-like, Coherent)", value="llm")
+        app_commands.Choice(name="LLM (Costs Cents, Human-like, Coherent)", value="llm"),
     ])
     async def mode(self, interaction: discord.Interaction, brain: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "brain_mode", brain.value)
@@ -204,32 +253,27 @@ class SettingsCog(commands.Cog):
             await interaction.response.send_message("I only roast humans!", ephemeral=True)
             return
         await interaction.response.defer(thinking=True)
-
         user_msgs = []
         async for msg in interaction.channel.history(limit=500):
             if msg.author.id == user.id and not msg.content.startswith("/") and msg.content.strip():
                 user_msgs.insert(0, msg.content)
                 if len(user_msgs) >= 30:
                     break
-
         if len(user_msgs) < 5:
             await interaction.followup.send(
                 f"{user.display_name} hasn't said enough for me to roast them.",
                 ephemeral=True,
             )
             return
-
         settings = await self.settings_manager.get_settings(interaction.guild.id)
         roast_prompt = (
             f"You are a ruthless, sarcastic smart-ass. Analyze these recent messages from {user.display_name} "
             f"and deliver a devastating, witty roast based on what they talk about and how they type. "
             f"Keep it 2-4 sentences. Be savage but clever. DO NOT use @ symbols or names in your response."
         )
-
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": roast_prompt,
                             "model": settings.get("llm_model", "meta-llama/llama-3-8b-instruct")})
-
         response = await generate_llm_response(roast_prompt, chat_history)
         if response:
             await interaction.followup.send(f"**Roasting {user.display_name}:** {sanitize_message(response)}")

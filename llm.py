@@ -1,19 +1,25 @@
 import aiohttp
 import os
 import re
-import base64
 import random
+import json
+import urllib.parse
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
+# Z.ai Sidecar URL (runs on localhost alongside the bot)
+ZAI_SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://127.0.0.1:3456")
 
+
+# ==========================================
+# OPENROUTER LLM (main chat - unchanged)
+# ==========================================
 async def generate_llm_response(system_prompt, chat_history, model_name=None):
     """Sends the context to OpenRouter and gets a coherent response."""
     if not OPENROUTER_API_KEY:
         print("ERROR: OPENROUTER_API_KEY is missing from environment variables!")
         return None
 
-    # Fallback model if none specified
     if not model_name:
         if chat_history and "model" in chat_history[0]:
             model_name = chat_history[0]["model"]
@@ -21,7 +27,6 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
         else:
             model_name = "meta-llama/llama-3-8b-instruct"
 
-    # Format messages - skip legacy model keys
     messages = [{"role": "system", "content": system_prompt}]
     for msg in chat_history:
         if "model" in msg:
@@ -58,10 +63,100 @@ async def generate_llm_response(system_prompt, chat_history, model_name=None):
         return None
 
 
+# ==========================================
+# Z.AI SIDECAR - Vision (analyze images)
+# ==========================================
+async def analyze_image_vision(image_url, prompt="Describe this image in detail."):
+    """
+    Send an image to the Z.ai sidecar for vision analysis.
+    Returns description string or None.
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ZAI_SIDECAR_URL}/vision",
+                json={"image_url": image_url, "prompt": prompt},
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("success"):
+                        return result.get("content")
+                    else:
+                        print(f"[VISION] Sidecar returned no content")
+                        return None
+                else:
+                    print(f"[VISION] Sidecar error: {resp.status}")
+                    return None
+    except Exception as e:
+        print(f"[VISION] Sidecar connection error: {e}")
+        return None
+
+
+# ==========================================
+# Z.AI SIDECAR - Image Generation
+# ==========================================
+async def generate_image_zai(prompt, size="1024x1024"):
+    """
+    Generate an image using Z.ai sidecar.
+    Returns base64 data URL string or None.
+    """
+    if not prompt or not prompt.strip():
+        return None
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ZAI_SIDECAR_URL}/image-generate",
+                json={"prompt": prompt.strip(), "size": size},
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("success") and result.get("image_url"):
+                        return result["image_url"]
+                print(f"[IMAGE-ZAI] Failed: {resp.status}")
+                return None
+    except Exception as e:
+        print(f"[IMAGE-ZAI] Connection error: {e}")
+        return None
+
+
+# ==========================================
+# Z.AI SIDECAR - Web Search
+# ==========================================
+async def web_search_zai(query, num=5):
+    """
+    Search the web using Z.ai sidecar.
+    Returns list of {url, title, snippet} dicts or None.
+    """
+    if not query or not query.strip():
+        return None
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ZAI_SIDECAR_URL}/web-search",
+                json={"query": query.strip(), "num": num},
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("success"):
+                        return result.get("results", [])
+                print(f"[SEARCH] Failed: {resp.status}")
+                return None
+    except Exception as e:
+        print(f"[SEARCH] Connection error: {e}")
+        return None
+
+
+# ==========================================
+# IMAGE GENERATION (unified - tries Z.ai first, falls back to OpenRouter/Pollinations)
+# ==========================================
 async def generate_image(prompt, model_name=None):
     """
-    Generate an image using OpenRouter with modalities API.
-    Falls back to Pollinations.ai if OpenRouter fails.
+    Generate an image. Tries Z.ai sidecar first, then OpenRouter, then Pollinations.
     Returns a URL string or None.
     """
     if not prompt or not prompt.strip():
@@ -69,7 +164,16 @@ async def generate_image(prompt, model_name=None):
 
     clean_prompt = prompt.strip()
 
-    # --- ATTEMPT 1: OpenRouter with modalities ---
+    # --- ATTEMPT 1: Z.ai Sidecar (free/better quality) ---
+    try:
+        img = await generate_image_zai(clean_prompt)
+        if img:
+            print("[IMAGE] Generated via Z.ai sidecar")
+            return img
+    except Exception as e:
+        print(f"[IMAGE] Z.ai sidecar failed: {e}")
+
+    # --- ATTEMPT 2: OpenRouter with modalities ---
     if OPENROUTER_API_KEY:
         try:
             img = await _openrouter_image(clean_prompt, model_name)
@@ -79,7 +183,7 @@ async def generate_image(prompt, model_name=None):
         except Exception as e:
             print(f"[IMAGE] OpenRouter failed: {e}, trying fallback...")
 
-    # --- ATTEMPT 2: Pollinations.ai (free, no API key needed) ---
+    # --- ATTEMPT 3: Pollinations.ai (free, no API key needed) ---
     try:
         img = await _pollinations_image(clean_prompt)
         if img:
@@ -96,7 +200,6 @@ async def _openrouter_image(prompt, model_name=None):
     if not model_name:
         model_name = "openai/gpt-4o"
 
-    # Only certain models support image output - restrict to known ones
     IMAGE_CAPABLE_MODELS = [
         "openai/gpt-4o",
         "openai/gpt-4o-mini",
@@ -143,20 +246,16 @@ async def _openrouter_image(prompt, model_name=None):
             message = choices[0].get("message", {})
             content = message.get("content", "")
 
-            # content can be a list of parts or a string
             if isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict):
-                        # Check for image_url format
                         if part.get("type") == "image_url":
                             img_url = part.get("image_url", {}).get("url", "")
                             if img_url:
                                 return img_url
-                        # Some models return base64 inline
                         if part.get("type") == "image" and part.get("data"):
                             return f"data:image/png;base64,{part['data']}"
             elif isinstance(content, str):
-                # If the response contains a URL, extract it
                 urls = re.findall(r'https?://[^\s"\'<>]+\.(?:png|jpg|jpeg|gif|webp)', content)
                 if urls:
                     return urls[0]
@@ -166,12 +265,10 @@ async def _openrouter_image(prompt, model_name=None):
 
 async def _pollinations_image(prompt):
     """Generate image via Pollinations.ai - free, no API key needed."""
-    # Pollinations.ai supports seed for reproducibility
     seed = random.randint(1, 999999)
-    encoded_prompt = aiohttp.helpers.quote(prompt)
+    encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
 
-    # Verify the URL works by doing a HEAD request
     async with aiohttp.ClientSession() as session:
         async with session.head(url, timeout=aiohttp.ClientTimeout(total=15), allow_redirects=True) as resp:
             if resp.status == 200:
@@ -181,17 +278,34 @@ async def _pollinations_image(prompt):
                 return None
 
 
+# ==========================================
+# SIDECAR HEALTH CHECK
+# ==========================================
+async def check_sidecar_health():
+    """Check if the Z.ai sidecar is running. Returns True/False."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{ZAI_SIDECAR_URL}/health",
+                timeout=aiohttp.ClientTimeout(total=3)
+            ) as resp:
+                return resp.status == 200
+    except Exception:
+        return False
+
+
+# ==========================================
+# SETTINGS PARSING (unchanged)
+# ==========================================
 async def parse_settings_command(user_message):
     """
     Parse a natural language settings command and return (key, value) or None.
-    Example: "switch to model meta-llama/llama-3-70b" -> ("llm_model", "meta-llama/llama-3-70b")
     """
     if not user_message or not user_message.strip():
         return None
 
     msg = user_message.lower().strip()
 
-    # Model switching patterns
     model_patterns = [
         r'(?:switch|change|set|use)\s+(?:to\s+)?(?:llm\s+)?model\s+["\']?([a-z0-9\-_./]+)',
         r'model\s*[:=]\s*["\']?([a-z0-9\-_./]+)',
@@ -209,11 +323,9 @@ async def parse_settings_command(user_message):
         match = re.search(pattern, msg)
         if match:
             candidate = match.group(1)
-            # Verify it looks like a real model identifier
             if any(kw in candidate for kw in known_model_keywords):
                 return ("llm_model", candidate)
 
-    # Image model switching
     img_model_patterns = [
         r'(?:image|img)\s+(?:model|gen(?:eration)?)\s+(?:switch|change|set|use|to)\s+["\']?([a-z0-9\-_./]+)',
         r'switch\s+(?:image|img)\s+model\s+(?:to\s+)?["\']?([a-z0-9\-_./]+)',
@@ -225,13 +337,11 @@ async def parse_settings_command(user_message):
             if any(kw in candidate for kw in known_model_keywords):
                 return ("image_model", candidate)
 
-    # Brain mode switching
     if any(kw in msg for kw in ["markov mode", "switch to markov", "use markov"]):
         return ("brain_mode", "markov")
     if any(kw in msg for kw in ["llm mode", "switch to llm", "use llm", "ai mode"]):
         return ("brain_mode", "llm")
 
-    # Boolean toggles
     bool_settings = {
         "response": "response_enabled",
         "responding": "response_enabled",
@@ -246,12 +356,10 @@ async def parse_settings_command(user_message):
             if any(w in msg for w in ["turn off", "disable", "stop"]):
                 return (setting_key, False)
 
-    # Cooldown adjustment
     cooldown_match = re.search(r'cooldown\s+(?:to\s+)?(\d+)', msg)
     if cooldown_match:
         return ("cooldown_seconds", int(cooldown_match.group(1)))
 
-    # Personality/prefix
     prefix_match = re.search(r'(?:personality|prefix|style)\s+(?:to\s+)?["\'](.+)["\']', msg, re.IGNORECASE)
     if prefix_match:
         return ("personality_prefix", prefix_match.group(1))
