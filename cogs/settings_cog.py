@@ -11,7 +11,6 @@ from engine.markov import MarkovChain
 from utils import sanitize_message
 from llm import generate_llm_response, parse_settings_command
 import json
-import os
 
 
 class SettingsCog(commands.Cog):

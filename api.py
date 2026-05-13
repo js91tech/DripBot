@@ -346,10 +346,11 @@ def create_api(bot_instance):
             # If guild_id specified, update only that guild; otherwise update all
             # Sync both 'model' (dashboard) and 'llm_model' (cogs) so GUI
             # changes actually take effect in message responses.
-            if gid_param and gid_param in sm.settings:
-                sm.settings[gid_param]["model"] = model
-                sm.settings[gid_param]["llm_model"] = model
-                await sm.save_settings(gid_param)
+            if gid_param:
+                gid = _resolve_guild_id(bot_instance, sm, gid_param)
+                sm.settings[gid]["model"] = model
+                sm.settings[gid]["llm_model"] = model
+                await sm.save_settings(gid)
             else:
                 for gid in sm.settings:
                     sm.settings[gid]["model"] = model
@@ -390,9 +391,10 @@ def create_api(bot_instance):
                 raise err
             gid_param = body.get("guild_id")
             # If guild_id specified, update only that guild; otherwise update all
-            if gid_param and gid_param in sm.settings:
-                sm.settings[gid_param][key] = value
-                await sm.save_settings(gid_param)
+            if gid_param:
+                gid = _resolve_guild_id(bot_instance, sm, gid_param)
+                sm.settings[gid][key] = value
+                await sm.save_settings(gid)
             else:
                 for gid in sm.settings:
                     sm.settings[gid][key] = value

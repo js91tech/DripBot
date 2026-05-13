@@ -128,7 +128,7 @@ class ChatCog(commands.Cog):
         lines = ["**Available Personality Presets:**\n"]
         for pid, preset in PERSONALITY_PRESETS.items():
             lines.append(f"- `{pid}` — {preset['name']}")
-        lines.append(f"\nUse `!personality <name>` to apply one.")
+        lines.append("\nUse `!personality <name>` to apply one.")
         await ctx.send("\n".join(lines))
 
     @commands.command(name="personality", aliases=["persona"])

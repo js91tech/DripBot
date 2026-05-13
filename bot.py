@@ -4,7 +4,6 @@ Main entry point. Fixed: cog loading, Database init, proper trigger wiring.
 Nothing removed — all v5.7 features preserved + puppet mode enabled via cogs.
 """
 
-import asyncio
 import logging
 import os
 import subprocess
