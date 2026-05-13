@@ -40,7 +40,7 @@ class LLMHandler:
         messages: list,
         model: str = None,
         system_prompt: str = None,
-        auto_router: bool = True,
+        auto_router: bool = False,
         allowed_models: List[str] = None,
         temperature: float = 0.8,
         max_tokens: int = 2048,
@@ -303,19 +303,31 @@ async def generate_llm_response(system_prompt: str, messages: list) -> Optional[
     Returns the response content string, or None on failure.
     """
     model = None
+    auto_router = False
+    allowed_models = None
     clean_messages = []
     actual_system_prompt = system_prompt
+    system_prompt_consumed = False
 
     for msg in messages:
         if msg.get("role") == "system":
-            # Extract model if embedded by the cog
+            # Extract routing metadata if embedded by the cog.
             if "model" in msg:
                 model = msg["model"]
-            # Use the system message content (may have memory context appended)
+            if "auto_router" in msg:
+                auto_router = bool(msg["auto_router"])
+            if "allowed_models" in msg and msg["allowed_models"]:
+                allowed_models = msg["allowed_models"]
+
+            # The first system message is the prompt. Additional system messages
+            # (for example timeline separators) should stay in the conversation
+            # instead of replacing the personality/system prompt.
             content = msg.get("content", "")
-            if content:
+            if content and not system_prompt_consumed:
                 actual_system_prompt = content
-            # Don't add to clean_messages — system_prompt param handles it
+                system_prompt_consumed = True
+            elif content:
+                clean_messages.append({"role": "system", "content": content})
         else:
             clean_messages.append(msg)
 
@@ -326,6 +338,8 @@ async def generate_llm_response(system_prompt: str, messages: list) -> Optional[
         clean_messages,
         model=model,
         system_prompt=actual_system_prompt,
+        auto_router=auto_router,
+        allowed_models=allowed_models,
     )
     return result.get("content") if result else None
 
@@ -446,6 +460,8 @@ async def parse_settings_command(prompt: str):
     result = await _llm_handler.chat(
         [{"role": "user", "content": prompt}],
         system_prompt=system_prompt,
+        model=DEFAULT_MODEL,
+        auto_router=False,
         temperature=0,
         max_tokens=150,
     )

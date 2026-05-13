@@ -8,12 +8,21 @@ from llm import generate_llm_response, parse_settings_command
 import json
 import os
 
+DEFAULT_LLM_MODEL = "meta-llama/llama-4-maverick:free"
+
 
 class SettingsCog(commands.Cog):
     def __init__(self, bot, db, settings_manager):
         self.bot = bot
         self.db = db
         self.settings_manager = settings_manager
+
+    def _llm_route(self, settings):
+        return {
+            "model": settings.get("llm_model") or settings.get("model", DEFAULT_LLM_MODEL),
+            "auto_router": bool(settings.get("auto_router_enabled", False)),
+            "allowed_models": settings.get("auto_router_allowed_models") or [],
+        }
 
     group = app_commands.Group(
         name="botsettings",
@@ -216,7 +225,7 @@ class SettingsCog(commands.Cog):
             await interaction.response.send_message(f"Invalid value for `{key}`.", ephemeral=True)
             return
         if isinstance(DEFAULTS[key], bool):
-            parsed_val = str(value).lower() in ["true", "yes", "on"]
+            parsed_val = str(value).lower() in ["true", "yes", "on", "1"]
         elif isinstance(DEFAULTS[key], int):
             parsed_val = int(value)
         elif isinstance(DEFAULTS[key], float):
@@ -329,8 +338,7 @@ class SettingsCog(commands.Cog):
             f"Keep it 2-4 sentences. Be savage but clever. DO NOT use @ symbols or names in your response."
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
-        chat_history.insert(0, {"role": "system", "content": roast_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+        chat_history.insert(0, {"role": "system", "content": roast_prompt, **self._llm_route(settings)})
         response = await generate_llm_response(roast_prompt, chat_history)
         if response:
             await interaction.followup.send(f"**Roasting {user.display_name}:** {sanitize_message(response)}")

@@ -5,6 +5,7 @@ Nothing removed — all v5.7 features preserved + puppet mode enabled via cogs.
 """
 
 import asyncio
+import atexit
 import logging
 import os
 import subprocess
@@ -53,16 +54,15 @@ try:
     if os.path.exists(sidecar_script):
         sidecar_process = subprocess.Popen(
             [sys.executable, sidecar_script],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
         )
         time.sleep(2)
         if sidecar_process.poll() is None:
             logger.info(f"Z.ai sidecar started on port {SIDECAR_PORT} (PID: {sidecar_process.pid})")
         else:
-            _, stderr = sidecar_process.communicate(timeout=5)
-            logger.warning(f"Z.ai sidecar crashed on start: {stderr.decode()[:300]}")
+            logger.warning(f"Z.ai sidecar crashed on start with exit code {sidecar_process.returncode}")
             sidecar_process = None
     else:
         logger.warning("zai_sidecar.py not found — Z.ai features (vision/search/image gen) disabled")
@@ -71,18 +71,24 @@ except Exception as e:
     sidecar_process = None
 
 
-# Drain sidecar pipes in background to prevent 64KB buffer deadlock
-def _drain_sidecar():
-    if sidecar_process:
-        try:
-            sidecar_process.stdout.read()
-            sidecar_process.stderr.read()
-        except Exception:
-            pass
+def _stop_sidecar():
+    """Terminate the managed sidecar when the bot process exits."""
+    global sidecar_process
+    if not sidecar_process or sidecar_process.poll() is not None:
+        sidecar_process = None
+        return
+    logger.info("Stopping Z.ai sidecar (PID: %s)", sidecar_process.pid)
+    sidecar_process.terminate()
+    try:
+        sidecar_process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logger.warning("Z.ai sidecar did not stop gracefully; killing it")
+        sidecar_process.kill()
+        sidecar_process.wait(timeout=5)
+    sidecar_process = None
 
 
-if sidecar_process:
-    threading.Thread(target=_drain_sidecar, daemon=True).start()
+atexit.register(_stop_sidecar)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -282,4 +288,7 @@ if __name__ == "__main__":
     keep_thread.start()
 
     # Run the bot
-    bot.run(TOKEN)
+    try:
+        bot.run(TOKEN)
+    finally:
+        _stop_sidecar()

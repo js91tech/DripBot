@@ -77,12 +77,23 @@ def _get_settings_manager(bot_instance):
     return sm, None
 
 
-def _resolve_guild_id(bot_instance, sm, guild_id: Optional[str] = None) -> str:
-    """Resolve which guild_id to use. Returns gid string."""
-    if guild_id and guild_id in sm.settings:
-        return guild_id
+def _resolve_guild_id(bot_instance, sm, guild_id: Optional[str] = None):
+    """Resolve which cached guild key to use.
+
+    Dashboard requests send guild IDs as strings, while the settings cache is
+    populated with Discord's integer guild IDs. Compare by string but return
+    the original cache key so existing settings lookups keep working.
+    """
+    if guild_id is not None and str(guild_id).strip():
+        requested = str(guild_id)
+        for cached_gid in sm.settings:
+            if str(cached_gid) == requested:
+                return cached_gid
+        raise HTTPException(404, detail=f"Unknown guild_id: {guild_id}")
+    if not sm.settings:
+        raise HTTPException(503, detail="No guilds loaded yet -- bot may still be starting")
     # Fallback to first available guild
-    return list(sm.settings.keys())[0]
+    return next(iter(sm.settings))
 
 
 def create_api(bot_instance):
@@ -280,10 +291,11 @@ def create_api(bot_instance):
             # If guild_id specified, update only that guild; otherwise update all
             # Sync both 'model' (dashboard) and 'llm_model' (cogs) so GUI
             # changes actually take effect in message responses.
-            if gid_param and gid_param in sm.settings:
-                sm.settings[gid_param]["model"] = model
-                sm.settings[gid_param]["llm_model"] = model
-                await sm.save_settings(gid_param)
+            if gid_param is not None and str(gid_param).strip():
+                gid = _resolve_guild_id(bot_instance, sm, gid_param)
+                sm.settings[gid]["model"] = model
+                sm.settings[gid]["llm_model"] = model
+                await sm.save_settings(gid)
             else:
                 for gid in sm.settings:
                     sm.settings[gid]["model"] = model
@@ -316,17 +328,18 @@ def create_api(bot_instance):
         try:
             body = await request.json()
             key = body.get("key")
-            value = body.get("value")
-            if key is None or value is None:
+            if key is None or "value" not in body:
                 raise HTTPException(400, detail="key and value required")
+            value = body["value"]
             sm, err = _get_settings_manager(bot_instance)
             if err:
                 raise err
             gid_param = body.get("guild_id")
             # If guild_id specified, update only that guild; otherwise update all
-            if gid_param and gid_param in sm.settings:
-                sm.settings[gid_param][key] = value
-                await sm.save_settings(gid_param)
+            if gid_param is not None and str(gid_param).strip():
+                gid = _resolve_guild_id(bot_instance, sm, gid_param)
+                sm.settings[gid][key] = value
+                await sm.save_settings(gid)
             else:
                 for gid in sm.settings:
                     sm.settings[gid][key] = value
