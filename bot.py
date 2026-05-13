@@ -4,6 +4,7 @@ Main entry point. Fixed: cog loading, Database init, proper trigger wiring.
 Nothing removed — all v5.7 features preserved + puppet mode enabled via cogs.
 """
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -112,18 +113,8 @@ async def on_ready():
     await db.init()
 
     # Pre-load settings for all guilds
-    saved_status = ""
     for guild in bot.guilds:
-        settings = await settings_manager.get_settings(guild.id)
-        if not saved_status:
-            saved_status = settings.get("personality_status", "")
-
-    if saved_status:
-        try:
-            await bot.change_presence(activity=discord.Game(name=saved_status))
-            logger.info(f"Applied saved bot status: {saved_status}")
-        except Exception as e:
-            logger.warning(f"Failed to apply saved bot status: {e}")
+        await settings_manager.get_settings(guild.id)
 
     # ── Load cogs ──
     cog_load_errors = []

@@ -82,47 +82,99 @@ class SettingsCog(commands.Cog):
         )
 
     # ==========================================
-    # /botsettings model - Quick LLM model picker
+    # /botsettings modelfree - Free LLM model picker
+    # /botsettings modelpaid - Paid LLM model picker
+    #
+    # FIX v5.8: Discord limits slash command choices to 25 max.
+    # The old /botsettings model had 29 choices which caused sync to fail
+    # (HTTP 400), blocking ALL slash commands from registering.
+    # Split into two commands, each well under the 25 limit.
     # ==========================================
-    @group.command(name="model", description="Quick-switch the LLM model")
-    @app_commands.describe(model="Choose an LLM model")
+
+    @group.command(name="modelfree", description="Switch to a free LLM model")
+    @app_commands.describe(model="Choose a free LLM model")
     @app_commands.choices(model=[
-        # Free
-        app_commands.Choice(name="Llama 3 8B (Free)", value="meta-llama/llama-3-8b-instruct"),
-        app_commands.Choice(name="Llama 3.1 8B (Free)", value="meta-llama/llama-3.1-8b-instruct"),
-        app_commands.Choice(name="Llama 3.1 70B (Free)", value="meta-llama/llama-3.1-70b-instruct"),
-        app_commands.Choice(name="Llama 3.1 405B (Free)", value="meta-llama/llama-3.1-405b-instruct"),
-        app_commands.Choice(name="Gemini 2.0 Flash (Free)", value="google/gemini-2.0-flash-exp:free"),
-        app_commands.Choice(name="Gemini 2.0 Thinking (Free)", value="google/gemini-2.0-flash-thinking-exp:free"),
-        app_commands.Choice(name="Mistral 7B (Free)", value="mistralai/mistral-7b-instruct:free"),
-        app_commands.Choice(name="Qwen 2 7B (Free)", value="qwen/qwen-2-7b-instruct"),
-        app_commands.Choice(name="Zephyr 7B (Free)", value="huggingfaceh4/zephyr-7b-beta:free"),
-        app_commands.Choice(name="OpenChat 7B (Free)", value="openchat/openchat-7b:free"),
-        # Paid
-        app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
-        app_commands.Choice(name="GPT-4o Mini", value="openai/gpt-4o-mini"),
-        app_commands.Choice(name="GPT-4 Turbo", value="openai/gpt-4-turbo"),
-        app_commands.Choice(name="Claude 3.5 Sonnet", value="anthropic/claude-3.5-sonnet"),
-        app_commands.Choice(name="Claude 3.7 Sonnet", value="anthropic/claude-3.7-sonnet"),
-        app_commands.Choice(name="Claude 3 Opus", value="anthropic/claude-3-opus"),
-        app_commands.Choice(name="Claude 3 Haiku", value="anthropic/claude-3-haiku"),
-        app_commands.Choice(name="Gemini Pro 1.5", value="google/gemini-pro-1.5"),
-        app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large"),
-        app_commands.Choice(name="DeepSeek V3", value="deepseek/deepseek-chat"),
-        app_commands.Choice(name="DeepSeek R1", value="deepseek/deepseek-r1"),
-        app_commands.Choice(name="Qwen 2.5 72B", value="qwen/qwen-2.5-72b-instruct"),
-        app_commands.Choice(name="Hermes 3 70B", value="nousresearch/nous-hermes-2-mixtral-8x7b-dpo"),
-        app_commands.Choice(name="Command R+", value="cohere/command-r-plus"),
-        app_commands.Choice(name="Dolphin 70B", value="cognitivecomputations/dolphin-70b"),
-        app_commands.Choice(name="WizardLM 2 8x22B", value="microsoft/wizardlm-2-8x22b"),
-        app_commands.Choice(name="Yi Large", value="01-ai/yi-large"),
+        app_commands.Choice(name="Llama 4 Maverick (Free)", value="meta-llama/llama-4-maverick:free"),
+        app_commands.Choice(name="Gemma 3 27B (Free)", value="google/gemma-3-27b-it:free"),
+        app_commands.Choice(name="Qwen3 235B (Free)", value="qwen/qwen3-235b-a22b:free"),
+        app_commands.Choice(name="Phi-4 Reasoning+ (Free)", value="microsoft/phi-4-reasoning-plus:free"),
+        app_commands.Choice(name="DeepSeek R1 (Free)", value="deepseek/deepseek-r1:free"),
+        app_commands.Choice(name="Nemotron 70B (Free)", value="nvidia/llama-3.1-nemotron-70b-instruct:free"),
+        app_commands.Choice(name="Gemma 3 12B (Free)", value="google/gemma-3-12b-it:free"),
+        app_commands.Choice(name="Mistral Small 3.1 (Free)", value="mistralai/mistral-small-3.1-24b-instruct:free"),
+        app_commands.Choice(name="Qwen3 32B (Free)", value="qwen/qwen3-32b:free"),
+        app_commands.Choice(name="Llama 3.3 70B (Free)", value="meta-llama/llama-3.3-70b-instruct:free"),
     ])
-    async def model_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
+    async def modelfree_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
+        await self.settings_manager.set_setting(interaction.guild.id, "model", model.value)
         await interaction.response.send_message(
             f"Model switched to **{model.name}** (`{model.value}`)",
             ephemeral=True,
         )
+
+    @group.command(name="modelpaid", description="Switch to a paid LLM model")
+    @app_commands.describe(model="Choose a paid LLM model")
+    @app_commands.choices(model=[
+        app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
+        app_commands.Choice(name="GPT-4.1", value="openai/gpt-4.1"),
+        app_commands.Choice(name="Claude Sonnet 4", value="anthropic/claude-sonnet-4"),
+        app_commands.Choice(name="Claude Opus 4", value="anthropic/claude-opus-4"),
+        app_commands.Choice(name="Gemini 2.5 Pro", value="google/gemini-2.5-pro"),
+        app_commands.Choice(name="Gemini 2.5 Flash", value="google/gemini-2.5-flash"),
+        app_commands.Choice(name="Llama 4 Maverick", value="meta-llama/llama-4-maverick"),
+        app_commands.Choice(name="DeepSeek Chat V3", value="deepseek/deepseek-chat-v3-0324"),
+        app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large-2411"),
+        app_commands.Choice(name="Grok 3", value="x-ai/grok-3"),
+        app_commands.Choice(name="Grok 3 Mini", value="x-ai/grok-3-mini"),
+        app_commands.Choice(name="o3-mini", value="openai/o3-mini"),
+        app_commands.Choice(name="o4-mini", value="openai/o4-mini"),
+        app_commands.Choice(name="Claude Haiku 3.5", value="anthropic/claude-haiku-3.5"),
+    ])
+    async def modelpaid_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
+        await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
+        await self.settings_manager.set_setting(interaction.guild.id, "model", model.value)
+        await interaction.response.send_message(
+            f"Model switched to **{model.name}** (`{model.value}`)",
+            ephemeral=True,
+        )
+
+    # ==========================================
+    # /image — Slash command for image generation
+    # FIX v5.8: Users kept typing /image which didn't exist.
+    # Now it works just like !imagine but as a slash command.
+    # ==========================================
+    @app_commands.command(name="image", description="Generate an image from a text prompt")
+    @app_commands.describe(prompt="Describe the image you want to generate")
+    async def slash_image(self, interaction: discord.Interaction, prompt: str):
+        await interaction.response.defer(thinking=True)
+        from llm import generate_image
+
+        guild_id = interaction.guild.id if interaction.guild else 0
+        settings = await self.settings_manager.get_settings(guild_id)
+        image_model = settings.get("image_model", "zai-sidecar")
+
+        try:
+            image_url = await generate_image(prompt, model_name=image_model)
+            if image_url:
+                import base64
+                import io
+                if image_url.startswith("data:image/"):
+                    header, encoded = image_url.split(",", 1)
+                    ext = header.split("/")[1].split(";")[0]
+                    img_data = base64.b64decode(encoded)
+                    img_file = discord.File(io.BytesIO(img_data), f"image.{ext}")
+                    await interaction.followup.send(file=img_file)
+                else:
+                    await interaction.followup.send(image_url)
+            else:
+                await interaction.followup.send(
+                    "Image generation failed. The sidecar might not be running, or the model is unavailable.\n"
+                    "Try switching image model with `/botsettings imgmodel` — **Pollinations** always works for free.",
+                    ephemeral=True,
+                )
+        except Exception as e:
+            await interaction.followup.send(f"Image generation error: `{e}`", ephemeral=True)
 
     # ==========================================
     # /botsettings imgmodel - Image model picker
@@ -278,7 +330,7 @@ class SettingsCog(commands.Cog):
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": roast_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-3-8b-instruct")})
+                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
         response = await generate_llm_response(roast_prompt, chat_history)
         if response:
             await interaction.followup.send(f"**Roasting {user.display_name}:** {sanitize_message(response)}")
