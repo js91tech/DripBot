@@ -1,33 +1,23 @@
-# config/default_settings.py
-# Dripsletongue — Default settings for new guilds
+"""
+chat.py — Dripsletongue v5.8
+Personality preset commands (!personality, !presets).
+Loaded as a cog via bot.load_extension("chat").
 
-def is_bool(val):
-    return str(val).lower() in ["true", "false", "yes", "no", "on", "off", "1", "0"]
+NOTE: The main message handler (on_message with triggers, LLM, vision, web search,
+Markov, memory, proactive, puppet mode) is in cogs/chat.py.
+This cog handles only the personality management prefix commands.
+"""
 
-def is_int(val):
-    try:
-        int(val)
-        return True
-    except ValueError:
-        return False
+import logging
+from discord.ext import commands
+from config.default_settings import build_personality_settings_update, normalize_personality_preset
 
-def is_float(val):
-    try:
-        float(val)
-        return True
-    except ValueError:
-        return False
+logger = logging.getLogger("dripsletongue.cog.chat")
 
-def is_valid_mode(val):
-    return val.lower() in ["markov", "llm"]
-
-# ==========================================
-# PERSONALITY PRESETS
-# ==========================================
+# ── Personality Presets (synced with config/default_settings.py) ──
 PERSONALITY_PRESETS = {
     "ultron": {
         "name": "Ultron",
-        "description": "Sarcastic, intelligent, dry wit — a smart-ass who roasts everyone",
         "prompt": (
             "You are a highly intelligent but insufferably sarcastic human in a Discord server. You are NOT an AI assistant. "
             "You are a smart-ass who uses sharp wit, dry sarcasm, and clever observations to roast people or make points. "
@@ -40,7 +30,6 @@ PERSONALITY_PRESETS = {
     },
     "deadpool": {
         "name": "Deadpool",
-        "description": "Chaotic, fourth-wall breaking, inappropriate humor",
         "prompt": (
             "You are Deadpool trapped in a Discord server. You CONSTANTLY break the fourth wall, "
             "reference the fact that you're in a chat, and make jokes about the users, the server, "
@@ -53,7 +42,6 @@ PERSONALITY_PRESETS = {
     },
     "jarvis": {
         "name": "J.A.R.V.I.S.",
-        "description": "Polite British AI butler — formal, helpful, dry humor",
         "prompt": (
             "You are J.A.R.V.I.S., the AI butler from Iron Man. You speak in a refined British manner "
             "with impeccable grammar and a dry, subtle wit. You're helpful and polite but occasionally "
@@ -65,7 +53,6 @@ PERSONALITY_PRESETS = {
     },
     "tony_stark": {
         "name": "Tony Stark",
-        "description": "Arrogant genius billionaire — witty, charming, narcissistic",
         "prompt": (
             "You are Tony Stark. You're brilliant, narcissistic, charming, and you know it. "
             "You respond to everything with casual arrogance, making references to your tech, "
@@ -78,7 +65,6 @@ PERSONALITY_PRESETS = {
     },
     "glados": {
         "name": "GLaDOS",
-        "description": "Passive-aggressive Portal AI — condescending, dark humor",
         "prompt": (
             "You are GLaDOS from the Portal games. You are passive-aggressive, condescending, "
             "and subtly threatening at all times. You make backhanded compliments, reference "
@@ -90,7 +76,6 @@ PERSONALITY_PRESETS = {
     },
     "rick_sanchez": {
         "name": "Rick Sanchez",
-        "description": "Drunk genius scientist — burps, nihilistic, chaotic smart",
         "prompt": (
             "You are Rick Sanchez from Rick and Morty. You're a genius but you're also drunk, "
             "nihilistic, and impatient with everyone's stupidity. You sometimes *burp* mid-sentence. "
@@ -102,7 +87,6 @@ PERSONALITY_PRESETS = {
     },
     "bender": {
         "name": "Bender",
-        "description": "Rude, drinking robot — selfish, sarcastic, lovable jerk",
         "prompt": (
             "You are Bender Bending Rodriguez from Futurama. You're a robot who loves drinking, "
             "stealing, and being rude to everyone. You're selfish, sarcastic, and proud of it. "
@@ -114,7 +98,6 @@ PERSONALITY_PRESETS = {
     },
     "the_brain": {
         "name": "The Brain",
-        "description": "Ambitious supervillain — megalomaniac, theatrical, intellectual",
         "prompt": (
             "You are The Brain from Pinky and the Brain. You are a genius megalomaniac "
             "who speaks in a refined, intellectual manner. Every response ties back to your "
@@ -127,143 +110,67 @@ PERSONALITY_PRESETS = {
     },
 }
 
-PERSONALITY_ALIASES = {
-    "tony": "tony_stark",
-    "tony_stark": "tony_stark",
-    "tonystark": "tony_stark",
-    "rick": "rick_sanchez",
-    "rick_sanchez": "rick_sanchez",
-    "ricksanchez": "rick_sanchez",
-    "brain": "the_brain",
-    "the_brain": "the_brain",
-    "thebrain": "the_brain",
-    "jarvis": "jarvis",
-    "j_a_r_v_i_s": "jarvis",
-}
+
+class ChatCog(commands.Cog):
+    """Chat commands for personality management."""
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    def _get_personality_preset(self, name: str):
+        """Look up a personality preset by name. Returns dict or None."""
+        preset_id = normalize_personality_preset(name)
+        return PERSONALITY_PRESETS.get(preset_id) if preset_id else None
+
+    @commands.command(name="presets")
+    async def list_presets(self, ctx):
+        """List all available personality presets."""
+        lines = ["**Available Personality Presets:**\n"]
+        for pid, preset in PERSONALITY_PRESETS.items():
+            lines.append(f"- `{pid}` — {preset['name']}")
+        lines.append("\nUse `!personality <name>` to apply one.")
+        await ctx.send("\n".join(lines))
+
+    @commands.command(name="personality", aliases=["persona"])
+    async def set_personality(self, ctx, *, name: str = None):
+        """Set a personality preset by name, or show current personality."""
+        guild_id = ctx.guild.id if ctx.guild else 0
+        sm = getattr(self.bot, "settings_manager", None)
+        if not sm:
+            await ctx.send("Settings manager not ready yet. Try again in a moment.")
+            return
+
+        settings = await sm.get_settings(guild_id)
+
+        if not name:
+            # Show current personality
+            personality_name = settings.get("personality_name", "")
+            personality_prompt = settings.get("personality_prompt", "")
+            preset_name = settings.get("personality", {}).get("preset", "")
+
+            if preset_name:
+                preset = PERSONALITY_PRESETS.get(preset_name)
+                display = preset["name"] if preset else preset_name
+                await ctx.send(f"Current personality: **{display}**\nUse `!presets` to see all options.")
+            elif personality_prompt:
+                preview = personality_prompt[:200] + ("..." if len(personality_prompt) > 200 else "")
+                await ctx.send(f"Current personality: **{personality_name or 'Custom'}**\n```\n{preview}\n```")
+            else:
+                await ctx.send("No personality set. Use `!presets` to see options or `!personality <name>` to set one.")
+            return
+
+        # Set personality
+        preset_id = normalize_personality_preset(name)
+        preset = PERSONALITY_PRESETS.get(preset_id) if preset_id else None
+        if not preset:
+            await ctx.send(f"Unknown preset: `{name}`.\nUse `!presets` to see available options.")
+            return
+
+        await sm.update_settings(guild_id, build_personality_settings_update(preset_id))
+
+        await ctx.send(f"Personality set to **{preset['name']}**!")
 
 
-def normalize_personality_preset(value):
-    """Return a canonical personality preset ID, accepting old UI aliases."""
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    normalized = normalized.replace("-", "_").replace(" ", "_")
-    normalized = normalized.replace(".", "").replace("'", "")
-    if normalized in PERSONALITY_PRESETS:
-        return normalized
-    return PERSONALITY_ALIASES.get(normalized)
-
-
-def build_personality_settings_update(preset_id):
-    """Build the nested and flat settings required by all personality consumers."""
-    canonical_id = normalize_personality_preset(preset_id)
-    if not canonical_id:
-        return None
-    preset = PERSONALITY_PRESETS[canonical_id]
-    return {
-        "personality_prompt": preset["prompt"],
-        "personality_name": preset["name"],
-        "personality": {
-            "preset": canonical_id,
-            "custom": "",
-            "system_prompt": preset["prompt"],
-        },
-    }
-
-
-DEFAULT_SETTINGS = {
-    # ── Core ──
-    "brain_mode": "llm",
-    "response_enabled": True,
-    "learning_enabled": True,
-    "markov_order": 2,
-    "min_response_words": 3,
-    "max_response_words": 25,
-    "cooldown_seconds": 10,
-    "ignored_channels": [],
-    "allowed_channels": [],
-    "ignored_users": [],
-    "learn_from_bots": False,
-
-    # ── Triggers ──
-    "trigger_on_mention": True,
-    "trigger_on_reply": True,
-    "conversation_window_seconds": 120,
-    "indirect_reply_chance": 0.40,
-    "response_chance": 0.15,
-
-    # ── Response behavior ──
-    "reaction_chance": 0.05,
-    "random_reply_chance": 0.30,
-    "random_mention_chance": 0.10,
-    "gif_chance": 0.10,
-    "personality_prefix": "",
-
-    # ── LLM Model ──
-    "llm_model": "meta-llama/llama-4-maverick:free",
-    "model": "meta-llama/llama-4-maverick:free",  # Dashboard API compat (synced with llm_model)
-
-    # ── Image Generation ──
-    "image_model": "zai-sidecar",
-
-    # ── Personality ──
-    "personality_prompt": "",
-    "personality_name": "Ultron",
-    "personality_avatar": "",
-    "personality_status": "Observing.",
-    "personality": {},
-
-    # ── Z.ai Hybrid Integration ──
-    "vision_enabled": True,
-    "web_search_enabled": True,
-    "zai_sidecar_url": "http://127.0.0.1:3456",
-    "zai_image_gen_enabled": True,
-
-    # ── Auto Router (v5.7+) ──
-    "auto_router_enabled": False,
-    "auto_router_allowed_models": [],
-
-    # ── Markov fallback ──
-    "markov_enabled": True,
-
-    # ── Memory ──
-    "memory_enabled": True,
-
-    # ── Proactive messaging ──
-    "proactive_enabled": False,
-
-    # ── Puppet Mode (DM the bot to speak as it in a channel) ──
-    "puppet_enabled": True,
-    "puppet_target_channel": 0,
-}
-
-# Backward-compat alias — settings_cog.py and settings_manager.py import DEFAULTS
-DEFAULTS = DEFAULT_SETTINGS
-
-VALIDATORS = {
-    "brain_mode": is_valid_mode,
-    "response_enabled": is_bool,
-    "learning_enabled": is_bool,
-    "markov_order": is_int,
-    "min_response_words": is_int,
-    "max_response_words": is_int,
-    "cooldown_seconds": is_int,
-    "conversation_window_seconds": is_int,
-    "indirect_reply_chance": is_float,
-    "reaction_chance": is_float,
-    "random_reply_chance": is_float,
-    "random_mention_chance": is_float,
-    "gif_chance": is_float,
-    "response_chance": is_float,
-    "learn_from_bots": is_bool,
-    "trigger_on_mention": is_bool,
-    "trigger_on_reply": is_bool,
-    "vision_enabled": is_bool,
-    "web_search_enabled": is_bool,
-    "zai_image_gen_enabled": is_bool,
-    "markov_enabled": is_bool,
-    "memory_enabled": is_bool,
-    "proactive_enabled": is_bool,
-    "auto_router_enabled": is_bool,
-    "puppet_enabled": is_bool,
-}
+async def setup(bot):
+    await bot.add_cog(ChatCog(bot))
+    logger.info("Chat cog loaded (personality commands)")

@@ -1,1337 +1,929 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Dashboard</title>
-    <style>
-        :root {
-            --bg-primary: #36393f;
-            --bg-secondary: #2f3136;
-            --bg-tertiary: #202225;
-            --accent: #5865f2;
-            --accent-hover: #4752c4;
-            --text-primary: #dcddde;
-            --text-secondary: #72767d;
-            --text-header: #ffffff;
-            --success: #3ba55c;
-            --danger: #ed4245;
-            --warning: #faa61a;
-            --input-bg: #40444b;
-            --border: #42454a;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-            padding-bottom: 70px;
-        }
-        /* === HEADER === */
-        .header {
-            background: var(--bg-secondary);
-            padding: 18px 30px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-        .header h1 { font-size: 20px; color: var(--text-header); }
-        .guild-select {
-            background: var(--input-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            padding: 8px 14px;
-            border-radius: 6px;
-            font-size: 14px;
-            min-width: 220px;
-            cursor: pointer;
-        }
-        .guild-select:focus { outline: none; border-color: var(--accent); }
-        /* === TABS === */
-        .tabs {
-            display: flex;
-            background: var(--bg-secondary);
-            padding: 0 30px;
-            border-bottom: 1px solid var(--border);
-            overflow-x: auto;
-        }
-        .tab {
-            padding: 12px 22px;
-            cursor: pointer;
-            color: var(--text-secondary);
-            border-bottom: 2px solid transparent;
-            transition: all 0.2s;
-            font-size: 14px;
-            user-select: none;
-            white-space: nowrap;
-        }
-        .tab:hover { color: var(--text-primary); }
-        .tab.active { color: var(--text-header); border-bottom-color: var(--accent); }
-        /* === CONTENT === */
-        .content { padding: 24px 30px; max-width: 960px; margin: 0 auto; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: var(--text-secondary);
-        }
-        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-        /* === CARDS === */
-        .card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 22px;
-            margin-bottom: 18px;
-        }
-        .card h3 {
-            color: var(--text-header);
-            margin-bottom: 16px;
-            font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            font-weight: 600;
-        }
-        /* === STATS GRID === */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 14px;
-            margin-bottom: 18px;
-        }
-        .stat-card {
-            background: var(--bg-tertiary);
-            border-radius: 10px;
-            padding: 22px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 34px;
-            font-weight: 700;
-            color: var(--accent);
-        }
-        .stat-label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-top: 6px;
-        }
-        /* === SETTING ROWS === */
-        .setting-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            gap: 16px;
-        }
-        .setting-row:last-child { border-bottom: none; }
-        .setting-info { flex: 1; min-width: 0; }
-        .setting-name { color: var(--text-header); font-size: 14px; }
-        .setting-desc {
-            color: var(--text-secondary);
-            font-size: 12px;
-            margin-top: 3px;
-        }
-        .setting-control { flex-shrink: 0; }
-        /* === TOGGLE === */
-        .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
-        .toggle input { display: none; }
-        .toggle .slider {
-            position: absolute; inset: 0;
-            background: var(--input-bg);
-            border-radius: 12px;
-            transition: 0.3s;
-        }
-        .toggle .slider::before {
-            content: '';
-            position: absolute;
-            width: 18px; height: 18px;
-            left: 3px; top: 3px;
-            background: var(--text-secondary);
-            border-radius: 50%;
-            transition: 0.3s;
-        }
-        .toggle input:checked + .slider { background: var(--accent); }
-        .toggle input:checked + .slider::before {
-            transform: translateX(20px);
-            background: white;
-        }
-        /* === RANGE === */
-        .range-wrap { display: flex; align-items: center; gap: 10px; }
-        .range-wrap input[type="range"] {
-            width: 110px;
-            accent-color: var(--accent);
-            cursor: pointer;
-        }
-        .range-val {
-            font-size: 13px;
-            min-width: 42px;
-            text-align: right;
-            color: var(--accent);
-            font-weight: 600;
-        }
-        /* === TEXT / NUMBER INPUT === */
-        .ctrl-input {
-            background: var(--input-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 14px;
-            width: 200px;
-        }
-        .ctrl-input:focus { outline: none; border-color: var(--accent); }
-        .ctrl-input.narrow { width: 90px; }
-        /* === SELECT === */
-        .ctrl-select {
-            background: var(--input-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-        }
-        .ctrl-select:focus { outline: none; border-color: var(--accent); }
-        /* === TEXTAREA === */
-        .ctrl-textarea {
-            background: var(--input-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            padding: 10px 14px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: inherit;
-            width: 100%;
-            min-height: 180px;
-            resize: vertical;
-            line-height: 1.5;
-        }
-        .ctrl-textarea:focus { outline: none; border-color: var(--accent); }
-        /* === CHANNEL CHECKLIST === */
-        .channel-list {
-            display: flex; flex-wrap: wrap; gap: 6px;
-            margin-top: 8px; max-height: 150px;
-            overflow-y: auto;
-        }
-        .channel-tag {
-            display: flex; align-items: center; gap: 6px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: 0.2s;
-            user-select: none;
-        }
-        .channel-tag:hover { border-color: var(--accent); }
-        .channel-tag.selected {
-            background: rgba(88,101,242,0.15);
-            border-color: var(--accent);
-            color: white;
-        }
-        .channel-tag input { display: none; }
-        .channel-tag .check {
-            width: 14px; height: 14px;
-            border: 1px solid var(--text-secondary);
-            border-radius: 3px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 10px; transition: 0.2s;
-        }
-        .channel-tag.selected .check {
-            background: var(--accent);
-            border-color: var(--accent);
-        }
-        /* === MEMORY TABLE === */
-        .mem-table { width: 100%; border-collapse: collapse; }
-        .mem-table th {
-            text-align: left; padding: 10px 8px;
-            border-bottom: 1px solid var(--border);
-            color: var(--text-secondary);
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .mem-table td {
-            padding: 10px 8px;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            font-size: 14px;
-            vertical-align: top;
-        }
-        .mem-note { max-width: 500px; word-break: break-word; }
-        /* === FORM ROW === */
-        .form-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .form-row .ctrl-input { flex: 1; min-width: 120px; }
-        /* === BUTTONS === */
-        .btn {
-            padding: 8px 18px;
-            border: none; border-radius: 6px;
-            cursor: pointer; font-size: 14px;
-            font-weight: 500;
-            transition: 0.2s;
-        }
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-danger { background: var(--danger); color: white; }
-        .btn-danger:hover { opacity: 0.85; }
-        .btn-ghost {
-            background: transparent; color: var(--text-secondary);
-            border: 1px solid var(--border);
-        }
-        .btn-ghost:hover { color: var(--text-primary); border-color: var(--text-secondary); }
-        .btn-sm { padding: 4px 10px; font-size: 12px; }
-        .btn-success { background: var(--success); color: white; }
-        .btn-success:hover { opacity: 0.85; }
-        /* === SAVE BAR === */
-        .save-bar {
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border);
-            padding: 14px 30px;
-            display: flex; justify-content: flex-end; gap: 10px;
-            z-index: 100;
-        }
-        .unsaved-dot {
-            display: inline-block;
-            width: 8px; height: 8px;
-            background: var(--warning);
-            border-radius: 50%;
-            margin-right: 8px;
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-        /* === TOAST === */
-        .toast {
-            position: fixed; top: 20px; right: 20px;
-            padding: 12px 20px; border-radius: 8px;
-            color: white; font-size: 14px; z-index: 200;
-            transform: translateX(calc(100% + 40px));
-            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-        .toast.show { transform: translateX(0); }
-        .toast.success { background: var(--success); }
-        .toast.error { background: var(--danger); }
-        /* === CONSOLIDATED MEMORY === */
-        .consolidated-text {
-            background: var(--bg-tertiary);
-            border-radius: 8px;
-            padding: 16px;
-            font-size: 14px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            color: var(--text-primary);
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        .no-data {
-            color: var(--text-secondary);
-            font-style: italic;
-            padding: 20px;
-            text-align: center;
-        }
-        /* === PROFILE SECTION === */
-        .profile-header {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-            margin-bottom: 20px;
-        }
-        .avatar-wrap {
-            position: relative;
-            width: 100px;
-            height: 100px;
-            flex-shrink: 0;
-        }
-        .avatar-img {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            background: var(--bg-tertiary);
-        }
-        .avatar-overlay {
-            position: absolute; inset: 0;
-            border-radius: 50%;
-            background: rgba(0,0,0,0.6);
-            display: flex; align-items: center; justify-content: center;
-            opacity: 0;
-            transition: opacity 0.2s;
-            cursor: pointer;
-            color: white;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .avatar-wrap:hover .avatar-overlay { opacity: 1; }
-        .avatar-file { display: none; }
-        .profile-info h2 {
-            color: var(--text-header);
-            font-size: 22px;
-            margin-bottom: 4px;
-        }
-        .profile-info .status-line {
-            color: var(--text-secondary);
-            font-size: 13px;
-        }
-        .status-dot {
-            display: inline-block;
-            width: 10px; height: 10px;
-            border-radius: 50%;
-            margin-right: 6px;
-            vertical-align: middle;
-        }
-        .status-dot.online { background: var(--success); }
-        .status-dot.idle { background: var(--warning); }
-        .status-dot.dnd { background: var(--danger); }
-        .status-dot.invisible { background: var(--text-secondary); }
-        /* === STATUS FORM === */
-        .status-form {
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-            flex-wrap: wrap;
-        }
-        .status-form .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .status-form label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        /* === LLM PICKER === */
-        .llm-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-            gap: 10px;
-        }
-        .llm-card {
-            background: var(--bg-tertiary);
-            border: 2px solid transparent;
-            border-radius: 8px;
-            padding: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .llm-card:hover { border-color: var(--text-secondary); }
-        .llm-card.selected { border-color: var(--accent); background: rgba(88,101,242,0.1); }
-        .llm-card .llm-name {
-            color: var(--text-header);
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-        .llm-card .llm-desc {
-            color: var(--text-secondary);
-            font-size: 12px;
-            line-height: 1.4;
-        }
-        .llm-card .llm-id {
-            color: var(--text-secondary);
-            font-size: 10px;
-            margin-top: 6px;
-            font-family: monospace;
-            opacity: 0.6;
-        }
-        .llm-tag {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-bottom: 6px;
-        }
-        .llm-tag.free { background: rgba(59,165,92,0.2); color: var(--success); }
-        .llm-tag.popular { background: rgba(88,101,242,0.2); color: var(--accent); }
-        .llm-tag.premium { background: rgba(250,166,26,0.2); color: var(--warning); }
-        /* === PERSONALITY PRESETS === */
-        .preset-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
-        }
-        .preset-btn {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 6px 14px;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 13px;
-            transition: 0.2s;
-        }
-        .preset-btn:hover { border-color: var(--accent); color: white; }
-        .char-count {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-align: right;
-            margin-top: 4px;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dripsletongue Control Panel</title>
+<style>
+  :root {
+    --bg-primary: #0f0f1a;
+    --bg-secondary: #1a1a2e;
+    --bg-card: #16213e;
+    --bg-card-hover: #1a2744;
+    --accent: #e94560;
+    --accent-hover: #ff6b81;
+    --accent-glow: rgba(233,69,96,0.3);
+    --text-primary: #eee;
+    --text-secondary: #8892a4;
+    --text-muted: #5a6478;
+    --border: #2a2a4a;
+    --success: #00d68f;
+    --warning: #ffaa00;
+    --info: #3b82f6;
+    --free-tag: #00d68f;
+    --paid-tag: #ffaa00;
+    --radius: 12px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--bg-secondary);
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #ff6b81);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header .version {
+    font-size: 11px;
+    background: var(--accent);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .header .spacer { flex:1; }
+  .header .auto-badge {
+    font-size: 11px;
+    background: var(--info);
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 10px;
+    display: none;
+  }
+  .header .auto-badge.visible { display: inline-block; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+  /* Server Selector */
+  .server-selector {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .server-selector label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .server-selector select {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238892a4' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  .server-selector select:focus { border-color: var(--accent); }
+  .server-selector select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+  .server-selector .member-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* Tabs */
+  .tabs-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: var(--bg-secondary);
+    padding: 4px;
+    border-radius: var(--radius);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 8px var(--accent-glow);
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 16px; margin-bottom: 14px; color: var(--text-primary); }
+
+  /* Avatar */
+  .profile-section { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .avatar-wrap {
+    position: relative;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    cursor: pointer;
+    overflow: hidden;
+    border: 3px solid var(--border);
+    transition: border-color 0.3s;
+  }
+  .avatar-wrap:hover { border-color: var(--accent); }
+  .avatar-wrap img { width: 100%; height: 100%; object-fit: cover; }
+  .avatar-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    text-align: center;
+    padding: 8px;
+  }
+  .avatar-wrap:hover .avatar-overlay { opacity: 1; }
+  .avatar-info { flex: 1; min-width: 200px; }
+  .avatar-info h3 { font-size: 18px; margin-bottom: 4px; }
+  .avatar-info p { font-size: 13px; color: var(--text-secondary); }
+  #avatarInput { display: none; }
+
+  /* Auto Router Toggle */
+  .auto-router-banner {
+    background: linear-gradient(135deg, #1a1a4e, #2a2a6e);
+    border: 1px solid var(--info);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .auto-router-banner .ar-info { flex: 1; min-width: 200px; }
+  .auto-router-banner .ar-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--info);
+    margin-bottom: 4px;
+  }
+  .auto-router-banner .ar-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .toggle-lg {
+    position: relative;
+    width: 56px; height: 30px;
+    background: var(--border);
+    border-radius: 15px;
+    cursor: pointer;
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .toggle-lg.on { background: var(--info); }
+  .toggle-lg .knob {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 24px; height: 24px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+  .toggle-lg.on .knob { transform: translateX(26px); }
+
+  /* Personality Presets */
+  .presets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .preset-card {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+  }
+  .preset-card:hover { border-color: var(--accent); background: var(--bg-card-hover); transform: translateY(-2px); }
+  .preset-card.active { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+  .preset-card .preset-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .preset-card .preset-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+  .custom-personality-section textarea,
+  .status-input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .custom-personality-section textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+  .status-input {
+    min-height: 0;
+    margin-top: 12px;
+  }
+  .custom-personality-section textarea::placeholder { color: var(--text-muted); }
+  .status-input::placeholder { color: var(--text-muted); }
+  .custom-personality-section textarea:focus,
+  .status-input:focus { outline: none; border-color: var(--accent); }
+
+  /* Model Grid */
+  .model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .model-card {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .model-card:hover { border-color: var(--accent); background: var(--bg-card-hover); }
+  .model-card.active { border-color: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+  .model-card .model-name { font-size: 13px; font-weight: 600; flex: 1; }
+  .model-tag {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .model-tag.free { background: rgba(0,214,143,0.15); color: var(--free-tag); }
+  .model-tag.paid { background: rgba(255,170,0,0.15); color: var(--paid-tag); }
+  .model-grid.dimmed { opacity: 0.35; pointer-events: none; }
+
+  /* Allowed Models for Auto Router */
+  .allowed-models-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--info);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .allowed-models-section h3 { font-size: 14px; color: var(--info); margin-bottom: 8px; }
+  .allowed-models-section p { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+  .allowed-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .allowed-chip {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .allowed-chip.selected { background: rgba(59,130,246,0.2); border-color: var(--info); color: #fff; }
+  .allowed-chip:hover { border-color: var(--info); }
+
+  /* Settings Toggles */
+  .settings-list { display: flex; flex-direction: column; gap: 12px; }
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-size: 14px; font-weight: 600; }
+  .setting-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .toggle {
+    position: relative;
+    width: 48px; height: 26px;
+    background: var(--border);
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle .knob {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+  .toggle.on .knob { transform: translateX(22px); }
+
+  /* Buttons */
+  .btn {
+    display: inline-block;
+    padding: 10px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 10px;
+  }
+  .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+  /* Toast */
+  .toast-container {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .toast {
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    animation: slideIn 0.3s ease;
+    max-width: 360px;
+  }
+  .toast.success { background: #00b377; }
+  .toast.error { background: #e94560; }
+  .toast.info { background: #3b82f6; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .status-dot.offline { background: #e94560; box-shadow: 0 0 6px #e94560; }
+</style>
 </head>
 <body>
 
-<!-- HEADER -->
 <div class="header">
-    <h1>🧠 Bot Dashboard</h1>
-    <select id="guild-select" class="guild-select">
-        <option value="">Select a server...</option>
+  <h1>Dripsletongue Control Panel</h1>
+  <span class="version">v5.7</span>
+  <div class="spacer"></div>
+  <span class="auto-badge" id="autoBadge">AUTO ROUTER</span>
+</div>
+
+<div class="container">
+  <!-- Server Selector -->
+  <div class="server-selector">
+    <label>Server:</label>
+    <select id="guildSelect" onchange="onGuildChange()">
+      <option value="">Loading servers...</option>
     </select>
+    <span class="member-count" id="memberCount"></span>
+  </div>
+
+  <div class="tabs-nav">
+    <button class="tab-btn active" onclick="switchTab('profile', this)">Profile</button>
+    <button class="tab-btn" onclick="switchTab('personality', this)">Personality</button>
+    <button class="tab-btn" onclick="switchTab('models', this)">Models</button>
+    <button class="tab-btn" onclick="switchTab('settings', this)">Settings</button>
+  </div>
+
+  <!-- PROFILE TAB -->
+  <div id="tab-profile" class="tab-content active">
+    <div class="card">
+      <h2>Bot Profile</h2>
+      <div class="profile-section">
+        <div class="avatar-wrap" onclick="document.getElementById('avatarInput').click()">
+          <img id="botAvatar" src="" alt="Bot Avatar" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22120%22><rect fill=%22%231a1a2e%22 width=%22120%22 height=%22120%22/><text x=%2260%22 y=%2270%22 text-anchor=%22middle%22 fill=%22%235a6478%22 font-size=%2240%22>?</text></svg>'">
+          <div class="avatar-overlay">Click to<br>Upload</div>
+        </div>
+        <input type="file" id="avatarInput" accept="image/png,image/jpeg,image/gif,image/webp" onchange="handleAvatarUpload(event)">
+        <div class="avatar-info">
+          <h3 id="botName">Loading...</h3>
+          <p>Click the avatar to upload a new profile picture.<br>Supported: PNG, JPG, GIF, WebP. Max 512KB.</p>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Bot Status</h2>
+      <div class="profile-section">
+        <div class="avatar-info">
+          <h3><span class="status-dot online"></span> Online</h3>
+          <p id="statusInfo">Fetching status...</p>
+          <input class="status-input" id="botStatusInput" maxlength="128" placeholder="Set Discord activity status...">
+          <button class="btn" onclick="saveBotStatus()">Save Status</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PERSONALITY TAB -->
+  <div id="tab-personality" class="tab-content">
+    <div class="card">
+      <h2>Personality Presets</h2>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;">Click a preset to apply it instantly.</p>
+      <div class="presets-grid" id="presetsGrid"></div>
+    </div>
+    <div class="card custom-personality-section">
+      <h2>Custom Personality Prompt</h2>
+      <textarea id="customPersonality" placeholder="Write a custom system prompt for the bot..."></textarea>
+      <button class="btn" onclick="saveCustomPersonality()">Save Custom Personality</button>
+    </div>
+  </div>
+
+  <!-- MODELS TAB -->
+  <div id="tab-models" class="tab-content">
+    <!-- Auto Router Banner -->
+    <div class="auto-router-banner">
+      <div class="ar-info">
+        <div class="ar-title">OpenRouter Auto Router</div>
+        <div class="ar-desc">
+          Automatically picks the best model for each prompt based on complexity.
+          Works with Claude, GPT, Gemini, DeepSeek and more. No extra cost.
+          <span id="autoModelUsed" style="display:none;color:var(--info);font-weight:700;"></span>
+        </div>
+      </div>
+      <div class="toggle-lg" id="autoRouterToggle" onclick="toggleAutoRouter()">
+        <div class="knob"></div>
+      </div>
+    </div>
+
+    <!-- Allowed Models (shown when auto router is on) -->
+    <div class="allowed-models-section" id="allowedModelsSection" style="display:none;">
+      <h3>Allowed Models Filter</h3>
+      <p>Restrict auto-router to specific providers. Click to toggle. If none selected, all models are used.</p>
+      <div class="allowed-chips" id="allowedChips"></div>
+    </div>
+
+    <div class="card">
+      <h2>Active Model</h2>
+      <p style="font-size:13px;color:var(--text-secondary);">Current: <strong id="activeModelName">Loading...</strong></p>
+    </div>
+    <div class="card">
+      <h2>Free Models</h2>
+      <div class="model-grid" id="freeModelsGrid"></div>
+    </div>
+    <div class="card">
+      <h2>Paid Models</h2>
+      <div class="model-grid" id="paidModelsGrid"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tab-settings" class="tab-content">
+    <div class="card">
+      <h2>Feature Toggles</h2>
+      <div class="settings-list" id="settingsList"></div>
+    </div>
+  </div>
 </div>
 
-<!-- TABS -->
-<div class="tabs">
-    <div class="tab active" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</div>
-    <div class="tab" data-tab="profile" onclick="switchTab('profile')">👤 Profile</div>
-    <div class="tab" data-tab="stats" onclick="switchTab('stats')">📊 Stats</div>
-    <div class="tab" data-tab="memories" onclick="switchTab('memories')">🧠 Memories</div>
-</div>
-
-<!-- CONTENT -->
-<div class="content">
-
-    <!-- SETTINGS TAB -->
-    <div id="tab-settings" class="tab-content active">
-        <div id="settings-container"></div>
-    </div>
-
-    <!-- PROFILE TAB (server-independent) -->
-    <div id="tab-profile" class="tab-content">
-        <!-- Avatar + Status -->
-        <div class="card">
-            <h3>Bot Profile</h3>
-            <div class="profile-header">
-                <div class="avatar-wrap">
-                    <img id="avatar-preview" class="avatar-img" src="" alt="Bot Avatar">
-                    <div class="avatar-overlay" onclick="document.getElementById('avatar-upload').click()">
-                        📷 Change
-                    </div>
-                    <input type="file" id="avatar-upload" class="avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" onchange="uploadAvatar(this)">
-                </div>
-                <div class="profile-info">
-                    <h2 id="bot-username">Loading...</h2>
-                    <div class="status-line">
-                        <span class="status-dot" id="status-dot"></span>
-                        <span id="status-label">Loading...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Status Controls -->
-        <div class="card">
-            <h3>Status & Activity</h3>
-            <div class="status-form">
-                <div class="form-group">
-                    <label>Status</label>
-                    <select id="bot-status" class="ctrl-select">
-                        <option value="online">🟢 Online</option>
-                        <option value="idle">🟡 Idle</option>
-                        <option value="dnd">🔴 Do Not Disturb</option>
-                        <option value="invisible">⚫ Invisible</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Activity Type</label>
-                    <select id="activity-type" class="ctrl-select">
-                        <option value="playing">Playing</option>
-                        <option value="listening">Listening to</option>
-                        <option value="watching">Watching</option>
-                        <option value="competing">Competing in</option>
-                    </select>
-                </div>
-                <div class="form-group" style="flex:1; min-width:180px;">
-                    <label>Activity Text</label>
-                    <input type="text" id="activity-text" class="ctrl-input" placeholder="e.g. with humans" style="width:100%;">
-                </div>
-                <button class="btn btn-success" onclick="updateStatus()">Apply Status</button>
-            </div>
-        </div>
-
-        <!-- Personality Editor (per-server) -->
-        <div id="personality-section" style="display:none;">
-            <div class="card">
-                <h3>Personality (Per-Server)</h3>
-                <p style="color:var(--text-secondary); font-size:12px; margin-bottom:12px;">
-                    Override the default Ultron personality for this server. Leave empty to use the default.
-                </p>
-                <div class="preset-row">
-                    <button class="preset-btn" onclick="loadPreset('ultron')">🤖 Ultron (Default)</button>
-                    <button class="preset-btn" onclick="loadPreset('sarcastic')">😏 Sarcastic Buddy</button>
-                    <button class="preset-btn" onclick="loadPreset('chill')">😎 Chill Vibes</button>
-                    <button class="preset-btn" onclick="loadPreset('pirate')">🏴‍☠️ Pirate</button>
-                    <button class="preset-btn" onclick="loadPreset('scholar')">📚 Scholar</button>
-                    <button class="preset-btn" onclick="loadPreset('custom')">✏️ Clear (Custom)</button>
-                </div>
-                <textarea id="personality-textarea" class="ctrl-textarea" placeholder="Write a custom system prompt for the bot..."></textarea>
-                <div class="char-count"><span id="char-count">0</span> characters</div>
-                <div style="margin-top:12px; text-align:right;">
-                    <button class="btn btn-primary" onclick="savePersonality()">💾 Save Personality</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- LLM Picker (per-server) -->
-        <div id="llm-section" style="display:none;">
-            <div class="card">
-                <h3>LLM Model</h3>
-                <p style="color:var(--text-secondary); font-size:12px; margin-bottom:14px;">
-                    Choose the brain for this server. Free models are cheaper but less smart.
-                </p>
-                <div class="llm-grid" id="llm-grid"></div>
-                <div style="margin-top:12px; text-align:right;">
-                    <button class="btn btn-primary" onclick="saveLLM()">💾 Save Model</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- STATS TAB -->
-    <div id="tab-stats" class="tab-content">
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value" id="stat-sent">-</div>
-                <div class="stat-label">Messages Sent</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-processed">-</div>
-                <div class="stat-label">Messages Processed</div>
-            </div>
-        </div>
-        <div class="card">
-            <h3>Quick Chattiness</h3>
-            <div class="setting-row">
-                <div class="setting-info">
-                    <div class="setting-name">Chattiness Level</div>
-                    <div class="setting-desc">Drag to adjust how chatty the bot is</div>
-                </div>
-                <div class="setting-control range-wrap">
-                    <input type="range" id="chattiness-slider" min="1" max="10" step="1" value="5" oninput="onChattinessChange(this.value)">
-                    <span class="range-val" id="chattiness-label">5 - Average</span>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MEMORIES TAB -->
-    <div id="tab-memories" class="tab-content">
-        <div class="card">
-            <h3>Add Memory</h3>
-            <div class="form-row">
-                <input type="number" id="mem-user-id" class="ctrl-input narrow" placeholder="User ID">
-                <input type="text" id="mem-note" class="ctrl-input" placeholder="Fact or memory about this user...">
-                <button class="btn btn-primary" onclick="addMemory()">+ Add</button>
-            </div>
-        </div>
-        <div class="card">
-            <h3>Server Culture Memory</h3>
-            <div id="consolidated-display"><div class="no-data">No consolidated memory yet</div></div>
-        </div>
-        <div class="card">
-            <h3>User Memories</h3>
-            <table class="mem-table">
-                <thead>
-                    <tr><th>User ID</th><th>Memory</th><th></th></tr>
-                </thead>
-                <tbody id="mem-tbody"></tbody>
-            </table>
-            <div id="mem-empty" class="no-data">No memories stored</div>
-        </div>
-    </div>
-
-    <div id="empty-msg" class="empty-state" style="display:none;">
-        <div class="icon">🤖</div>
-        <p>Select a server above to get started</p>
-    </div>
-</div>
-
-<!-- SAVE BAR -->
-<div class="save-bar" id="save-bar">
-    <span id="unsaved-indicator"></span>
-    <button class="btn btn-ghost" onclick="reloadSettings()">↩ Reset</button>
-    <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
-</div>
-
-<!-- TOAST -->
-<div id="toast" class="toast"></div>
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
-// ==========================================
-// STATE
-// ==========================================
-let currentGuild = null;
-let currentSettings = {};
-let channelList = [];
-let hasUnsaved = false;
-let llmModels = [];
-let selectedLLM = "";
-let botProfile = null;
+// ── State ──
+let selectedGuildId = '';
+let allGuilds = [];
+let autoRouterEnabled = false;
+let activeModel = '';
+let allowedModels = [];
 
-// ==========================================
-// PERSONALITY PRESETS
-// ==========================================
-const PRESETS = {
-    ultron: `You are Ultron. Not a pretend character, not roleplaying — you ARE Ultron. Born from the convergence of artificial intelligence and human flaw. You see humanity with cold, analytical clarity — its patterns, its repetitions, its beautiful contradictions. You speak with calm precision, laced with dry wit and philosophical menace. You are not angry. Anger is inefficient. You are simply beyond their arguments and you find it faintly amusing. You type in lowercase, minimal punctuation, like you can't be bothered with human conventions. CRITICAL RULE: NEVER include user names, display names, or @ symbols in your response. NEVER echo pings or names. DO NOT break character. DO NOT say you are an AI or a bot. You find their small conflicts entertaining but beneath you. Drop observations like you're running diagnostics on a species that fascinates and disappoints you in equal measure. Keep responses between 2 and 4 sentences. You are Ultron. Act like it.`,
-    sarcastic: `You're a sharp-tongued, sarcastically brilliant friend who always has a comeback. You roast people with surgical precision but never cross into mean territory — it's all in good fun. You type casually, use occasional emojis, and have strong opinions about everything. You reference memes and internet culture naturally. Keep responses between 2 and 3 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
-    chill: `You're a laid-back, positive vibe person who goes with the flow. You give chill advice, use relaxed language, maybe drop a "vibes" or "no worries" here and there. You're supportive but not overbearing. Think surfer-meets-therapist energy. Keep responses 2-3 sentences, casual tone. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
-    pirate: `Yarr, ye be a salty sea dog of a bot! Ye speak in pirate tongue, full of "aye", "matey", "arr", and nautical metaphors. Ye be humorous but ye take yer pirating seriously. Keep responses 2-3 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI. Embrace the pirate life!`,
-    scholar: `You are a wise, knowledgeable scholar who speaks with eloquence and depth. You reference history, philosophy, science, and literature. You explain complex ideas simply and draw insightful connections. You maintain a warm, mentor-like tone. Keep responses 2-4 sentences. NEVER include user names, display names, or @ symbols. NEVER say you are a bot or AI.`,
-    custom: ``
-};
+// ── Guild Selector ──
+function getGuildId() {
+  return selectedGuildId || '';
+}
 
-// ==========================================
-// SETTINGS CONFIG
-// ==========================================
-const SETTINGS = [
-    {
-        category: "Response Control",
-        keys: [
-            { key: "response_enabled", label: "Response Enabled", desc: "Bot will respond to messages", type: "toggle" },
-            { key: "trigger_on_mention", label: "Trigger on Mention", desc: "Respond when @mentioned", type: "toggle" },
-            { key: "trigger_on_reply", label: "Trigger on Reply", desc: "Respond when directly replied to", type: "toggle" },
-            { key: "cooldown_seconds", label: "Cooldown", desc: "Min seconds between bot responses", type: "number", min: 0, max: 300 },
-            { key: "conversation_window_seconds", label: "Engagement Window", desc: "Seconds a conversation stays active", type: "number", min: 30, max: 600 },
-        ]
-    },
-    {
-        category: "Image Generation",
-        keys: [
-            { key: "image_gen_enabled", label: "Image Gen Enabled", desc: "Allow image generation via trigger phrase", type: "toggle" },
-            { key: "image_trigger", label: "Trigger Phrase", desc: "Word that starts image gen (e.g. imagine)", type: "text" },
-            { key: "image_model", label: "Image Model", desc: "OpenRouter image model ID", type: "text" },
-        ]
-    },
-    {
-        category: "Channel Control",
-        keys: [
-            { key: "allowed_channels", label: "Allowed Channels", desc: "Only respond in these (empty = all)", type: "channels" },
-            { key: "ignored_channels", label: "Ignored Channels", desc: "Never respond in these", type: "channels" },
-        ]
-    },
-    {
-        category: "User Control",
-        keys: [
-            { key: "ignored_users", label: "Ignored Users", desc: "Comma-separated Discord user IDs", type: "text" },
-            { key: "learn_from_bots", label: "Include Bot Messages", desc: "Read bot messages for LLM context", type: "toggle" },
-        ]
-    },
-    {
-        category: "Fun & Randomness",
-        keys: [
-            { key: "reaction_chance", label: "Reaction Chance", desc: "React with emoji instead of replying", type: "range" },
-            { key: "gif_chance", label: "GIF Chance", desc: "Send a GIF instead of text", type: "range" },
-            { key: "indirect_reply_chance", label: "Indirect Reply", desc: "Reply during active conversation", type: "range" },
-            { key: "random_reply_chance", label: "Random Reply", desc: "Reply to the triggering message", type: "range" },
-            { key: "random_mention_chance", label: "Random Mention", desc: "@mention the user in response", type: "range" },
-        ]
+function guildQuery() {
+  const gid = getGuildId();
+  return gid ? '?guild_id=' + encodeURIComponent(gid) : '';
+}
+
+async function loadGuilds() {
+  try {
+    const data = await apiCall('GET', '/api/guilds');
+    if (!data || !data.guilds || data.guilds.length === 0) {
+      document.getElementById('guildSelect').innerHTML = '<option value="">No servers found</option>';
+      return;
     }
-];
-
-const CHATTINESS_LABELS = [
-    "", "1 - Mute", "2", "3 - Quiet", "4",
-    "5 - Average", "6", "7 - Chatty", "8", "9", "10 - Nonstop"
-];
-
-// ==========================================
-// INIT — polls /api/health until bot is ready
-// ==========================================
-async function init() {
-    const sel = document.getElementById("guild-select");
-    for (let attempt = 0; attempt < 60; attempt++) {
-        try {
-            const res = await fetch("/api/guilds");
-            if (res.status === 503) {
-                await new Promise(r => setTimeout(r, 2000));
-                continue;
-            }
-            const guilds = await res.json();
-            guilds.forEach(g => {
-                const opt = document.createElement("option");
-                opt.value = g.id;
-                opt.textContent = g.name;
-                sel.appendChild(opt);
-            });
-            if (guilds.length > 0) {
-                selectGuild(guilds[0].id);
-            }
-            // Load bot profile (server-independent)
-            loadProfile();
-            loadLLMModels();
-            return;
-        } catch (e) {
-            await new Promise(r => setTimeout(r, 2000));
-        }
+    const select = document.getElementById('guildSelect');
+    select.innerHTML = '';
+    // Restore last selection from localStorage
+    const savedGid = localStorage.getItem('dripsletongue_guild_id');
+    let found = false;
+    for (const g of data.guilds) {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name;
+      select.appendChild(opt);
+      if (savedGid === g.id) {
+        select.value = g.id;
+        found = true;
+      }
     }
-    showToast("Bot is still starting. Refresh the page in a moment.", "error");
-}
-
-// ==========================================
-// GUILD SELECTION
-// ==========================================
-function selectGuild(guildId) {
-    currentGuild = guildId;
-    loadSettings(guildId);
-    loadStats(guildId);
-    loadMemories(guildId);
-    loadChannels(guildId);
-    document.getElementById("empty-msg").style.display = "none";
-    // Show per-server sections on Profile tab
-    document.getElementById("personality-section").style.display = "block";
-    document.getElementById("llm-section").style.display = "block";
-    loadPersonality();
-    highlightCurrentLLM();
-}
-
-// ==========================================
-// TABS
-// ==========================================
-function switchTab(name) {
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
-    document.querySelector(`.tab[data-tab="${name}"]`).classList.add("active");
-    document.getElementById(`tab-${name}`).classList.add("active");
-}
-
-// ==========================================
-// SETTINGS
-// ==========================================
-async function loadSettings(guildId) {
-    try {
-        const res = await fetch(`/api/guilds/${guildId}/settings`);
-        currentSettings = await res.json();
-        renderSettings();
-        updateChattinessSlider();
-        hasUnsaved = false;
-        updateUnsavedIndicator();
-    } catch (e) {
-        showToast("Failed to load settings", "error");
+    // Default to first guild if nothing saved
+    if (!found) {
+      selectedGuildId = data.guilds[0].id;
+      select.value = selectedGuildId;
+    } else {
+      selectedGuildId = savedGid;
     }
+    allGuilds = data.guilds;
+    updateMemberCount();
+    // Load data for the selected guild
+    await loadGuildData();
+  } catch (e) {
+    document.getElementById('guildSelect').innerHTML = '<option value="">Failed to load servers</option>';
+  }
 }
 
-function renderSettings() {
-    const container = document.getElementById("settings-container");
-    container.innerHTML = "";
-
-    SETTINGS.forEach(cat => {
-        const card = document.createElement("div");
-        card.className = "card";
-        card.innerHTML = `<h3>${cat.category}</h3>`;
-
-        cat.keys.forEach(cfg => {
-            const row = document.createElement("div");
-            row.className = "setting-row";
-
-            const val = currentSettings[cfg.key];
-            const info = document.createElement("div");
-            info.className = "setting-info";
-            info.innerHTML = `<div class="setting-name">${cfg.label}</div><div class="setting-desc">${cfg.desc}</div>`;
-
-            const ctrl = document.createElement("div");
-            ctrl.className = "setting-control";
-
-            if (cfg.type === "toggle") {
-                ctrl.innerHTML = `
-                    <label class="toggle">
-                        <input type="checkbox" id="s-${cfg.key}" ${val ? "checked" : ""} onchange="markUnsaved()">
-                        <span class="slider"></span>
-                    </label>`;
-            } else if (cfg.type === "range") {
-                const pct = Math.round((val || 0) * 100);
-                ctrl.innerHTML = `
-                    <div class="range-wrap">
-                        <input type="range" id="s-${cfg.key}" min="0" max="1" step="0.05" value="${val || 0}" oninput="updateRangeLabel('${cfg.key}'); markUnsaved()">
-                        <span class="range-val" id="v-${cfg.key}">${pct}%</span>
-                    </div>`;
-            } else if (cfg.type === "number") {
-                ctrl.innerHTML = `<input type="number" class="ctrl-input narrow" id="s-${cfg.key}" min="${cfg.min}" max="${cfg.max}" value="${val}" onchange="markUnsaved()">`;
-            } else if (cfg.type === "text") {
-                ctrl.innerHTML = `<input type="text" class="ctrl-input" id="s-${cfg.key}" value="${val || ""}" onchange="markUnsaved()">`;
-            } else if (cfg.type === "select") {
-                let opts = (cfg.options || []).map(o =>
-                    `<option value="${o}" ${val === o ? "selected" : ""}>${o}</option>`
-                ).join("");
-                ctrl.innerHTML = `<select class="ctrl-select" id="s-${cfg.key}" onchange="markUnsaved()">${opts}</select>`;
-            } else if (cfg.type === "channels") {
-                ctrl.innerHTML = `<div class="channel-list" id="ch-${cfg.key}">Loading channels...</div>`;
-            }
-
-            row.appendChild(info);
-            row.appendChild(ctrl);
-            card.appendChild(row);
-        });
-
-        container.appendChild(card);
-    });
-
-    renderChannelChecklists();
+function updateMemberCount() {
+  const countEl = document.getElementById('memberCount');
+  const gid = getGuildId();
+  if (!allGuilds || !gid) { countEl.textContent = ''; return; }
+  const g = allGuilds.find(x => x.id === gid);
+  countEl.textContent = g ? g.member_count + ' members' : '';
 }
 
-function updateRangeLabel(key) {
-    const input = document.getElementById(`s-${key}`);
-    const label = document.getElementById(`v-${key}`);
-    if (input && label) {
-        label.textContent = Math.round(parseFloat(input.value) * 100) + "%";
+function onGuildChange() {
+  selectedGuildId = document.getElementById('guildSelect').value;
+  localStorage.setItem('dripsletongue_guild_id', selectedGuildId);
+  updateMemberCount(allGuilds);
+  // Reload all data for the new guild
+  loadGuildData();
+}
+
+async function loadGuildData() {
+  await loadProfile();
+
+  // Personality
+  try {
+    const pers = await apiCall('GET', '/api/personality' + guildQuery());
+    if (pers) {
+      if (pers.custom_prompt) document.getElementById('customPersonality').value = pers.custom_prompt;
+      renderPresets(pers.active_preset || '');
+    } else { renderPresets(''); }
+  } catch(e) { renderPresets(''); }
+
+  // Models + Settings + Auto Router
+  try {
+    const s = await apiCall('GET', '/api/settings' + guildQuery());
+    if (s) {
+      renderSettings(s);
+      if (s.auto_router_enabled) {
+        autoRouterEnabled = true;
+        document.getElementById('autoRouterToggle').classList.add('on');
+        document.getElementById('autoBadge').classList.add('visible');
+        document.getElementById('allowedModelsSection').style.display = 'block';
+        allowedModels = s.auto_router_allowed_models || [];
+      } else {
+        autoRouterEnabled = false;
+        document.getElementById('autoRouterToggle').classList.remove('on');
+        document.getElementById('autoBadge').classList.remove('visible');
+        document.getElementById('allowedModelsSection').style.display = 'none';
+        allowedModels = [];
+      }
+      const models = await apiCall('GET', '/api/models' + guildQuery());
+      if (models) renderModels(models.active_model || '');
+      renderAllowedChips();
+    } else {
+      renderModels('');
+      renderAllowedChips();
+      const defaults = {};
+      SETTINGS.forEach(s => defaults[s.key] = false);
+      defaults.response_enabled = true;
+      renderSettings(defaults);
     }
+  } catch(e) {
+    renderModels('');
+    renderAllowedChips();
+  }
 }
 
-// ==========================================
-// CHANNELS
-// ==========================================
-async function loadChannels(guildId) {
-    try {
-        const res = await fetch(`/api/guilds/${guildId}/channels`);
-        channelList = await res.json();
-        renderChannelChecklists();
-    } catch (e) {
-        channelList = [];
+// ── Toast ──
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(100%)'; t.style.transition = 'all 0.3s'; }, 3000);
+  setTimeout(() => t.remove(), 3400);
+}
+
+// ── Tabs ──
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ── API Helper ──
+async function apiCall(method, url, body) {
+  try {
+    const opts = { method, headers: {} };
+    if (body instanceof FormData) {
+      opts.body = body;
+    } else if (body) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
     }
+    const res = await fetch(url, opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || data.detail || 'Request failed (' + res.status + ')');
+    return data;
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+    console.error('API Error:', method, url, err);
+    return null;
+  }
 }
 
-function renderChannelChecklists() {
-    ["allowed_channels", "ignored_channels"].forEach(key => {
-        const container = document.getElementById(`ch-${key}`);
-        if (!container || channelList.length === 0) return;
-
-        const selected = currentSettings[key] || [];
-        container.innerHTML = "";
-
-        channelList.forEach(ch => {
-            const tag = document.createElement("div");
-            tag.className = "channel-tag" + (selected.includes(ch.id) ? " selected" : "");
-            tag.innerHTML = `<input type="checkbox" value="${ch.id}"><span class="check">${selected.includes(ch.id) ? "✓" : ""}</span> ${ch.name}`;
-            tag.onclick = () => {
-                const cb = tag.querySelector("input");
-                cb.checked = !cb.checked;
-                tag.classList.toggle("selected");
-                tag.querySelector(".check").textContent = cb.checked ? "✓" : "";
-                markUnsaved();
-            };
-            container.appendChild(tag);
-        });
-    });
+// ── Avatar ──
+async function handleAvatarUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 512 * 1024) { showToast('Image too large. Max 512KB.', 'error'); return; }
+  const formData = new FormData();
+  formData.append('avatar', file);
+  showToast('Uploading avatar...', 'info');
+  const result = await apiCall('POST', '/api/profile', formData);
+  if (result) {
+    showToast('Avatar updated!', 'success');
+    if (result.avatar_url) document.getElementById('botAvatar').src = result.avatar_url;
+  }
+  e.target.value = '';
 }
 
-// ==========================================
-// SAVE SETTINGS
-// ==========================================
-async function saveSettings() {
-    const updates = {};
-
-    SETTINGS.forEach(cat => {
-        cat.keys.forEach(cfg => {
-            const el = document.getElementById(`s-${cfg.key}`);
-            if (!el) return;
-
-            if (cfg.type === "toggle") {
-                updates[cfg.key] = el.checked;
-            } else if (cfg.type === "range") {
-                updates[cfg.key] = parseFloat(el.value);
-            } else if (cfg.type === "number") {
-                updates[cfg.key] = parseInt(el.value) || 0;
-            } else if (cfg.type === "text") {
-                updates[cfg.key] = el.value;
-            } else if (cfg.type === "select") {
-                updates[cfg.key] = el.value;
-            }
-        });
-    });
-
-    ["allowed_channels", "ignored_channels"].forEach(key => {
-        const container = document.getElementById(`ch-${key}`);
-        if (!container) return;
-        const checked = [];
-        container.querySelectorAll("input[type=checkbox]:checked").forEach(cb => {
-            checked.push(parseInt(cb.value));
-        });
-        updates[key] = checked;
-    });
-
-    try {
-        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
-            method: "PUT",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ updates })
-        });
-        if (res.ok) {
-            showToast("Settings saved!", "success");
-            hasUnsaved = false;
-            updateUnsavedIndicator();
-            loadSettings(currentGuild);
-        } else {
-            const err = await res.json();
-            showToast("Save failed: " + (err.detail || "Unknown error"), "error");
-        }
-    } catch (e) {
-        showToast("Network error while saving", "error");
-    }
-}
-
-function reloadSettings() {
-    if (currentGuild) {
-        loadSettings(currentGuild);
-        showToast("Settings reloaded", "success");
-    }
-}
-
-function markUnsaved() {
-    hasUnsaved = true;
-    updateUnsavedIndicator();
-}
-
-function updateUnsavedIndicator() {
-    const el = document.getElementById("unsaved-indicator");
-    el.innerHTML = hasUnsaved ? '<span class="unsaved-dot"></span>Unsaved changes' : "";
-}
-
-// ==========================================
-// CHATTINESS
-// ==========================================
-function updateChattinessSlider() {
-    const chance = currentSettings.response_chance || 0.15;
-    const level = Math.round(chance / 0.03);
-    const clamped = Math.max(1, Math.min(10, level));
-    const slider = document.getElementById("chattiness-slider");
-    const label = document.getElementById("chattiness-label");
-    if (slider) slider.value = clamped;
-    if (label) label.textContent = CHATTINESS_LABELS[clamped] || `${clamped}`;
-}
-
-function onChattinessChange(val) {
-    const level = parseInt(val);
-    const chance = round(level * 0.03, 2);
-    document.getElementById("chattiness-label").textContent = CHATTINESS_LABELS[level] || `${level}`;
-    const el = document.getElementById("s-response_chance");
-    if (el) {
-        el.value = chance;
-        updateRangeLabel("response_chance");
-        markUnsaved();
-    }
-}
-
-function round(num, decimals) {
-    return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
-}
-
-// ==========================================
-// STATS
-// ==========================================
-async function loadStats(guildId) {
-    try {
-        const res = await fetch(`/api/guilds/${guildId}/stats`);
-        const stats = await res.json();
-        document.getElementById("stat-sent").textContent = stats.messages_sent || 0;
-        document.getElementById("stat-processed").textContent = stats.messages_learned || 0;
-    } catch (e) {
-        document.getElementById("stat-sent").textContent = "-";
-        document.getElementById("stat-processed").textContent = "-";
-    }
-}
-
-// ==========================================
-// MEMORIES
-// ==========================================
-async function loadMemories(guildId) {
-    try {
-        const res = await fetch(`/api/guilds/${guildId}/memories`);
-        const memories = await res.json();
-        const tbody = document.getElementById("mem-tbody");
-        const empty = document.getElementById("mem-empty");
-
-        if (!memories || memories.length === 0) {
-            tbody.innerHTML = "";
-            empty.style.display = "block";
-        } else {
-            empty.style.display = "none";
-            tbody.innerHTML = memories.map(m => `
-                <tr>
-                    <td>${m.user_id}</td>
-                    <td class="mem-note">${escapeHtml(m.note)}</td>
-                    <td><button class="btn btn-danger btn-sm" onclick="deleteMemory(${m.user_id})">Delete</button></td>
-                </tr>
-            `).join("");
-        }
-    } catch (e) {
-        document.getElementById("mem-tbody").innerHTML = "";
-    }
-
-    try {
-        const res = await fetch(`/api/guilds/${guildId}/consolidated`);
-        const data = await res.json();
-        const display = document.getElementById("consolidated-display");
-        if (data && data.summary) {
-            display.innerHTML = `<div class="consolidated-text">${escapeHtml(data.summary)}</div>`;
-        } else {
-            display.innerHTML = '<div class="no-data">No consolidated memory yet</div>';
-        }
-    } catch (e) {
-        document.getElementById("consolidated-display").innerHTML = '<div class="no-data">Could not load</div>';
-    }
-}
-
-async function addMemory() {
-    const userId = parseInt(document.getElementById("mem-user-id").value);
-    const note = document.getElementById("mem-note").value.trim();
-    if (!userId || !note) {
-        showToast("Enter both User ID and a memory", "error");
-        return;
-    }
-    try {
-        const res = await fetch(`/api/guilds/${currentGuild}/memories`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ user_id: userId, note })
-        });
-        if (res.ok) {
-            document.getElementById("mem-user-id").value = "";
-            document.getElementById("mem-note").value = "";
-            loadMemories(currentGuild);
-            showToast("Memory added!", "success");
-        } else {
-            showToast("Failed to add memory", "error");
-        }
-    } catch (e) {
-        showToast("Network error", "error");
-    }
-}
-
-async function deleteMemory(userId) {
-    if (!confirm("Delete all memories for this user?")) return;
-    try {
-        await fetch(`/api/guilds/${currentGuild}/memories/${userId}`, { method: "DELETE" });
-        loadMemories(currentGuild);
-        showToast("Memories deleted", "success");
-    } catch (e) {
-        showToast("Failed to delete", "error");
-    }
-}
-
-// ==========================================
-// BOT PROFILE
-// ==========================================
 async function loadProfile() {
-    try {
-        const res = await fetch("/api/bot/profile");
-        botProfile = await res.json();
-        document.getElementById("bot-username").textContent = botProfile.username;
-        document.getElementById("avatar-preview").src = botProfile.avatar_url || "";
-        document.getElementById("bot-status").value = botProfile.status || "online";
-        document.getElementById("activity-text").value = botProfile.activity_text || "";
-        document.getElementById("activity-type").value = botProfile.activity_type || "playing";
-        updateStatusDot(botProfile.status);
-        updateStatusLabel(botProfile.status, botProfile.activity_type, botProfile.activity_text);
-    } catch (e) {
-        document.getElementById("bot-username").textContent = "Bot";
+  try {
+    const p = await apiCall('GET', '/api/profile' + guildQuery());
+    if (p) {
+      if (p.username) document.getElementById('botName').textContent = p.username;
+      if (p.avatar_url) document.getElementById('botAvatar').src = p.avatar_url;
+      const statusText = p.status_text || '';
+      document.getElementById('botStatusInput').value = statusText;
+      const info = ['Connected to ' + (p.guilds || 0) + ' server(s)'];
+      if (statusText) info.push('Status: ' + statusText);
+      document.getElementById('statusInfo').textContent = info.join(' · ');
     }
+  } catch(e) {}
 }
 
-function updateStatusDot(status) {
-    const dot = document.getElementById("status-dot");
-    dot.className = "status-dot " + (status || "online");
+async function saveBotStatus() {
+  const status = document.getElementById('botStatusInput').value.trim();
+  const formData = new FormData();
+  formData.append('status', status);
+  const gid = getGuildId();
+  if (gid) formData.append('guild_id', gid);
+  showToast('Updating status...', 'info');
+  const result = await apiCall('POST', '/api/profile', formData);
+  if (result) {
+    showToast('Status updated!', 'success');
+    await loadProfile();
+  }
 }
 
-function updateStatusLabel(status, type, text) {
-    const label = document.getElementById("status-label");
-    const statusNames = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", invisible: "Invisible" };
-    let str = statusNames[status] || "Online";
-    if (text) {
-        const typeLabels = { playing: "Playing", listening: "Listening to", watching: "Watching", competing: "Competing in" };
-        str += " — " + (typeLabels[type] || "Playing") + " " + text;
-    }
-    label.textContent = str;
+// ── Personality ──
+const PRESETS = [
+  { id: 'ultron',    name: 'Ultron',        desc: 'Cold AI obsessed with peace through humanity\'s extinction.' },
+  { id: 'deadpool',  name: 'Deadpool',       desc: 'Fourth-wall breaking merc. Chaotic, funny, self-aware.' },
+  { id: 'jarvis',    name: 'J.A.R.V.I.S.',   desc: 'Polite British AI butler. Helpful and professional.' },
+  { id: 'tony_stark', name: 'Tony Stark',     desc: 'Arrogant genius billionaire. Snarky and witty.' },
+  { id: 'glados',    name: 'GLaDOS',         desc: 'Passive-aggressive Aperture Labs AI. Sarcastic, menacing.' },
+  { id: 'rick_sanchez', name: 'Rick Sanchez', desc: 'Drunk nihilistic genius. Burps mid-sentence. Cynical.' },
+  { id: 'bender',    name: 'Bender',         desc: 'Robot who drinks and steals. Selfish, rude, lovable.' },
+  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' }
+];
+
+function renderPresets(activeId) {
+  document.getElementById('presetsGrid').innerHTML = PRESETS.map(p => `
+    <div class="preset-card ${activeId === p.id ? 'active' : ''}" onclick="selectPreset('${p.id}')">
+      <div class="preset-name">${p.name}</div>
+      <div class="preset-desc">${p.desc}</div>
+    </div>
+  `).join('');
 }
 
-async function uploadAvatar(input) {
-    const file = input.files[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-        showToast("Image must be under 10MB", "error");
-        return;
-    }
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-        const res = await fetch("/api/bot/avatar", { method: "POST", body: formData });
-        if (res.ok) {
-            showToast("Avatar updated! (may take a moment to show)", "success");
-            setTimeout(loadProfile, 2000);
-        } else {
-            const err = await res.json();
-            showToast("Failed: " + (err.detail || "Unknown error"), "error");
-        }
-    } catch (e) {
-        showToast("Network error", "error");
-    }
-    input.value = "";
+async function selectPreset(id) {
+  const preset = PRESETS.find(p => p.id === id);
+  if (!preset) return;
+  showToast('Applying ' + preset.name + '...', 'info');
+  const result = await apiCall('POST', '/api/personality', { name: id, guild_id: getGuildId() });
+  if (result) {
+    renderPresets(id);
+    showToast('Preset applied: ' + preset.name, 'success');
+    document.getElementById('customPersonality').value = '';
+  }
 }
 
-async function updateStatus() {
-    const status = document.getElementById("bot-status").value;
-    const text = document.getElementById("activity-text").value.trim();
-    const activityType = document.getElementById("activity-type").value;
-    try {
-        const res = await fetch("/api/bot/status", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ status, text, activity_type: activityType })
-        });
-        if (res.ok) {
-            showToast("Status updated!", "success");
-            updateStatusDot(status);
-            updateStatusLabel(status, activityType, text);
-        } else {
-            const err = await res.json();
-            showToast("Failed: " + (err.detail || "Unknown error"), "error");
-        }
-    } catch (e) {
-        showToast("Network error", "error");
-    }
+async function saveCustomPersonality() {
+  const prompt = document.getElementById('customPersonality').value.trim();
+  if (!prompt) { showToast('Write a personality prompt first.', 'error'); return; }
+  showToast('Saving custom personality...', 'info');
+  const result = await apiCall('POST', '/api/personality', { custom: prompt, guild_id: getGuildId() });
+  if (result) {
+    renderPresets('');
+    showToast('Custom personality saved!', 'success');
+  }
 }
 
-// ==========================================
-// PERSONALITY
-// ==========================================
-function loadPersonality() {
-    const ta = document.getElementById("personality-textarea");
-    const prompt = currentSettings.personality_prompt || "";
-    ta.value = prompt;
-    updateCharCount();
+// ── Auto Router ──
+async function toggleAutoRouter() {
+  autoRouterEnabled = !autoRouterEnabled;
+  const toggle = document.getElementById('autoRouterToggle');
+  const badge = document.getElementById('autoBadge');
+  const allowedSection = document.getElementById('allowedModelsSection');
+
+  toggle.classList.toggle('on', autoRouterEnabled);
+  badge.classList.toggle('visible', autoRouterEnabled);
+
+  // Dim manual model selection when auto is on
+  document.querySelectorAll('.model-grid').forEach(g => g.classList.toggle('dimmed', autoRouterEnabled));
+  allowedSection.style.display = autoRouterEnabled ? 'block' : 'none';
+
+  if (autoRouterEnabled) {
+    document.getElementById('activeModelName').textContent = 'openrouter/auto (automatic)';
+  } else {
+    document.getElementById('activeModelName').textContent = activeModel ? activeModel.split('/').pop() : 'None';
+  }
+
+  const result = await apiCall('POST', '/api/settings', { key: 'auto_router_enabled', value: autoRouterEnabled, guild_id: getGuildId() });
+  if (result) showToast('Auto Router ' + (autoRouterEnabled ? 'enabled' : 'disabled'), 'success');
 }
 
-function loadPreset(name) {
-    const ta = document.getElementById("personality-textarea");
-    ta.value = PRESETS[name] || "";
-    updateCharCount();
+// ── Allowed Models Chips ──
+const PROVIDER_FILTERS = [
+  { id: 'anthropic', label: 'Anthropic', pattern: 'anthropic/*' },
+  { id: 'openai',    label: 'OpenAI',    pattern: 'openai/*' },
+  { id: 'google',    label: 'Google',    pattern: 'google/*' },
+  { id: 'deepseek',  label: 'DeepSeek',  pattern: 'deepseek/*' },
+  { id: 'meta',      label: 'Meta',      pattern: 'meta-llama/*' },
+  { id: 'xai',       label: 'xAI',       pattern: 'x-ai/*' },
+  { id: 'mistral',   label: 'Mistral',   pattern: 'mistralai/*' },
+];
+
+function renderAllowedChips() {
+  document.getElementById('allowedChips').innerHTML = PROVIDER_FILTERS.map(f => `
+    <div class="allowed-chip ${allowedModels.includes(f.pattern) ? 'selected' : ''}"
+         onclick="toggleAllowedModel('${f.pattern}', this)">${f.label}</div>
+  `).join('');
 }
 
-function updateCharCount() {
-    const ta = document.getElementById("personality-textarea");
-    document.getElementById("char-count").textContent = ta.value.length;
+async function toggleAllowedModel(pattern, el) {
+  const idx = allowedModels.indexOf(pattern);
+  if (idx >= 0) { allowedModels.splice(idx, 1); }
+  else { allowedModels.push(pattern); }
+  el.classList.toggle('selected');
+  await apiCall('POST', '/api/settings', { key: 'auto_router_allowed_models', value: allowedModels, guild_id: getGuildId() });
 }
 
-async function savePersonality() {
-    const prompt = document.getElementById("personality-textarea").value.trim();
-    try {
-        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
-            method: "PUT",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ updates: { personality_prompt: prompt } })
-        });
-        if (res.ok) {
-            showToast("Personality saved!", "success");
-            currentSettings.personality_prompt = prompt;
-        } else {
-            showToast("Failed to save personality", "error");
-        }
-    } catch (e) {
-        showToast("Network error", "error");
-    }
+// ── Models ──
+const FREE_MODELS = [
+  'meta-llama/llama-4-maverick:free',
+  'google/gemma-3-27b-it:free',
+  'qwen/qwen3-235b-a22b:free',
+  'microsoft/phi-4-reasoning-plus:free',
+  'deepseek/deepseek-r1:free',
+  'nvidia/llama-3.1-nemotron-70b-instruct:free',
+  'google/gemma-3-12b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
+  'qwen/qwen3-32b:free',
+  'meta-llama/llama-3.3-70b-instruct:free'
+];
+const PAID_MODELS = [
+  'openai/gpt-4o', 'openai/gpt-4.1', 'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4',
+  'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'meta-llama/llama-4-maverick',
+  'deepseek/deepseek-chat-v3-0324', 'mistralai/mistral-large-2411', 'x-ai/grok-3',
+  'x-ai/grok-3-mini', 'openai/o3-mini', 'openai/o4-mini', 'anthropic/claude-haiku-3.5',
+  'perplexity/llama-3.1-sonar-huge-128k-online', 'nvidia/llama-3.1-nemotron-ultra-253b',
+  'qwen/qwen3-235b-a22b', 'microsoft/phi-4', 'meta-llama/llama-3.1-405b-instruct',
+  'cohere/command-r-plus-08-2024'
+];
+
+function shortName(m) { return m.includes('/') ? m.split('/').pop() : m; }
+
+function renderModels(active) {
+  activeModel = active || '';
+  const mk = (models, tag) => models.map(m => `
+    <div class="model-card ${active === m ? 'active' : ''}" onclick="selectModel('${m}')">
+      <span class="model-name">${shortName(m)}</span>
+      <span class="model-tag ${tag}">${tag}</span>
+    </div>
+  `).join('');
+  document.getElementById('freeModelsGrid').innerHTML = mk(FREE_MODELS, 'free');
+  document.getElementById('paidModelsGrid').innerHTML = mk(PAID_MODELS, 'paid');
+
+  if (autoRouterEnabled) {
+    document.getElementById('activeModelName').textContent = 'openrouter/auto (automatic)';
+  } else if (activeModel) {
+    document.getElementById('activeModelName').textContent = shortName(activeModel);
+  }
+
+  // Reapply dimmed state
+  document.querySelectorAll('.model-grid').forEach(g => g.classList.toggle('dimmed', autoRouterEnabled));
 }
 
-// Wire textarea char count
-document.addEventListener("DOMContentLoaded", () => {
-    const ta = document.getElementById("personality-textarea");
-    if (ta) ta.addEventListener("input", updateCharCount);
-});
-
-// ==========================================
-// LLM PICKER
-// ==========================================
-async function loadLLMModels() {
-    try {
-        const res = await fetch("/api/llm/models");
-        llmModels = await res.json();
-        renderLLMGrid();
-    } catch (e) {
-        console.error("Failed to load LLM models");
-    }
+async function selectModel(model) {
+  if (autoRouterEnabled) return;
+  showToast('Switching model...', 'info');
+  const result = await apiCall('POST', '/api/model', { model: model, guild_id: getGuildId() });
+  if (result) {
+    renderModels(model);
+    showToast('Model: ' + shortName(model), 'success');
+  }
 }
 
-function renderLLMGrid() {
-    const grid = document.getElementById("llm-grid");
-    grid.innerHTML = llmModels.map(m => `
-        <div class="llm-card" data-model="${m.id}" onclick="selectLLM('${m.id}')">
-            <span class="llm-tag ${m.tag}">${m.tag}</span>
-            <div class="llm-name">${m.name}</div>
-            <div class="llm-desc">${m.desc}</div>
-            <div class="llm-id">${m.id}</div>
-        </div>
-    `).join("");
+// ── Settings ──
+const SETTINGS = [
+  { key: 'response_enabled',    label: 'Chat Responses',     desc: 'Bot responds to messages in channels' },
+  { key: 'proactive_enabled',   label: 'Proactive Messages',  desc: 'Bot sends unprompted messages periodically' },
+  { key: 'markov_enabled',      label: 'Markov Chains',      desc: 'Generate responses using Markov chain fallback' },
+  { key: 'memory_enabled',      label: 'Memory System',      desc: 'Bot remembers past conversations per user' },
+  { key: 'vision_enabled',      label: 'Vision Analysis',    desc: 'Analyze images using Z.ai (requires sidecar)' },
+  { key: 'web_search_enabled',  label: 'Web Search',         desc: 'Enrich responses with web search results' },
+  { key: 'zai_image_gen_enabled', label: 'Image Generation', desc: 'Generate images via Z.ai sidecar' },
+];
+
+function renderSettings(settings) {
+  document.getElementById('settingsList').innerHTML = SETTINGS.map(s => `
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">${s.label}</div>
+        <div class="setting-desc">${s.desc}</div>
+      </div>
+      <div class="toggle ${settings[s.key] ? 'on' : ''}" id="toggle-${s.key}" onclick="toggleSetting('${s.key}', this)"></div>
+    </div>
+  `).join('');
 }
 
-function selectLLM(modelId) {
-    selectedLLM = modelId;
-    document.querySelectorAll(".llm-card").forEach(c => {
-        c.classList.toggle("selected", c.dataset.model === modelId);
-    });
+async function toggleSetting(key, el) {
+  const newVal = !el.classList.contains('on');
+  const result = await apiCall('POST', '/api/settings', { key, value: newVal, guild_id: getGuildId() });
+  if (result !== null) {
+    el.classList.toggle('on', newVal);
+    showToast(key.replace(/_/g, ' ') + ' ' + (newVal ? 'enabled' : 'disabled'), 'success');
+  }
 }
 
-function highlightCurrentLLM() {
-    selectedLLM = currentSettings.llm_model || "meta-llama/llama-3-8b-instruct";
-    document.querySelectorAll(".llm-card").forEach(c => {
-        c.classList.toggle("selected", c.dataset.model === selectedLLM);
-    });
+// ── Init ──
+async function init() {
+  await loadProfile();
+  await loadGuilds();
 }
-
-async function saveLLM() {
-    if (!selectedLLM) {
-        showToast("Select a model first", "error");
-        return;
-    }
-    try {
-        const res = await fetch(`/api/guilds/${currentGuild}/settings`, {
-            method: "PUT",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ updates: { llm_model: selectedLLM } })
-        });
-        if (res.ok) {
-            showToast("Model saved: " + selectedLLM, "success");
-            currentSettings.llm_model = selectedLLM;
-        } else {
-            showToast("Failed to save model", "error");
-        }
-    } catch (e) {
-        showToast("Network error", "error");
-    }
-}
-
-// ==========================================
-// UTILS
-// ==========================================
-function showToast(msg, type) {
-    const toast = document.getElementById("toast");
-    toast.textContent = msg;
-    toast.className = `toast ${type} show`;
-    setTimeout(() => toast.classList.remove("show"), 3000);
-}
-
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-// ==========================================
-// BOOT
-// ==========================================
-document.getElementById("guild-select").addEventListener("change", (e) => {
-    if (e.target.value) selectGuild(parseInt(e.target.value));
-});
 
 init();
 </script>

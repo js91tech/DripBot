@@ -7,8 +7,13 @@ class SettingsManager:
         self.db = db
         self.cache = {}
 
+    @property
+    def settings(self):
+        """Expose cache as 'settings' for api.py compatibility."""
+        return self.cache
+
     async def load_settings(self):
-        # Cache is populated on demand
+        # Cache is populated on demand by get_settings
         pass
 
     async def get_settings(self, guild_id):
@@ -19,67 +24,46 @@ class SettingsManager:
                 # this ensures old servers get the new keys automatically instead of crashing.
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
-
-                # MIGRATION: force brain_mode to llm (markov is dead)
-                if full_settings.get("brain_mode") == "markov":
-                    full_settings["brain_mode"] = "llm"
-                    print(
-                        f"[{guild_id}] Migrated brain_mode "
-                        f"markov -> llm"
-                    )
-
                 self.cache[guild_id] = full_settings
-                # Persist the migration
-                await self.db.save_settings(
-                    guild_id, full_settings
-                )
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
-                await self.db.save_settings(
-                    guild_id, self.cache[guild_id]
-                )
+                await self.db.save_settings(guild_id, self.cache[guild_id])
         return self.cache[guild_id]
 
-    async def migrate_all_guilds(self):
-        """Sweep all known guilds and fix stale settings."""
-        cursor = await self.db.conn.execute(
-            "SELECT guild_id FROM settings"
-        )
-        rows = await cursor.fetchall()
-        fixed = 0
-        for (guild_id,) in rows:
-            settings = await self.get_settings(guild_id)
-            if settings.get("brain_mode") == "markov":
-                settings["brain_mode"] = "llm"
-                await self.db.save_settings(
-                    guild_id, settings
-                )
-                self.cache.pop(guild_id, None)
-                fixed += 1
-        if fixed:
-            print(
-                f"[MIGRATION] Fixed brain_mode for "
-                f"{fixed} guild(s)"
-            )
-        return fixed
+    async def save_settings(self, guild_id, settings_dict=None):
+        """
+        Save settings for a guild.
+        - If settings_dict is provided, merge it into cache first.
+        - If settings_dict is None, save whatever is currently in cache.
+        Both patterns are needed:
+          - api.py does: sm.settings[gid][key] = val; await sm.save_settings(gid)
+          - Internal code does: await sm.save_settings(gid, update_data)
+        """
+        if settings_dict is not None:
+            if guild_id in self.cache:
+                self.cache[guild_id].update(settings_dict)
+            else:
+                self.cache[guild_id] = copy.deepcopy(DEFAULTS)
+                self.cache[guild_id].update(settings_dict)
+        await self.db.save_settings(guild_id, self.cache.get(guild_id, {}))
 
     async def set_setting(self, guild_id, key, value):
         settings = await self.get_settings(guild_id)
         settings[key] = value
-        await self.db.save_settings(guild_id, settings)
+        await self.save_settings(guild_id)
         return settings
 
     async def update_settings(self, guild_id, update_data):
-        """Used by the FastAPI dashboard to update multiple settings at once"""
+        """Used by the FastAPI dashboard and slash commands to update multiple settings at once."""
         settings = await self.get_settings(guild_id)
         settings.update(update_data)
-        await self.db.save_settings(guild_id, settings)
+        await self.save_settings(guild_id)
         return settings
 
     async def reset_setting(self, guild_id, key):
         settings = await self.get_settings(guild_id)
         settings[key] = DEFAULTS.get(key)
-        await self.db.save_settings(guild_id, settings)
+        await self.save_settings(guild_id)
         return settings
 
     async def reset_all(self, guild_id):
