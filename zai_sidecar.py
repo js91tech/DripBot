@@ -27,6 +27,47 @@ logger = logging.getLogger("zai_sidecar")
 PORT = int(os.environ.get("ZAI_SIDECAR_PORT", 3456))
 
 
+def _extract_json(text):
+    """Extract JSON object or array from CLI output that may contain emoji lines.
+
+    The z-ai CLI prints emoji progress lines (like "🚀 Initializing...")
+    mixed with the actual JSON response. The JSON can be multi-line (pretty-printed).
+    This function finds the first '[' or '{' and accumulates until the matching
+    closing bracket, handling nested structures.
+    """
+    depth = 0
+    start = -1
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if ch in ('[', '{'):
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch in (']', '}'):
+            depth -= 1
+            if depth == 0 and start >= 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    pass
+
+    return None
+
+
 def run_cli(args, timeout=60):
     """Run a z-ai CLI command and return parsed JSON output."""
     try:
@@ -41,23 +82,16 @@ def run_cli(args, timeout=60):
             logger.error(f"CLI error (exit {result.returncode}): {result.stderr[:300]}")
             return None
 
-        # Parse JSON from stdout — skip emoji/progress lines
-        lines = result.stdout.strip().split("\n")
-        json_str = ""
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("[") or stripped.startswith("{"):
-                json_str = stripped
-        if not json_str:
-            logger.error(f"No JSON in CLI output: {result.stdout[:200]}")
+        # Try to extract JSON from mixed emoji+JSON output
+        parsed = _extract_json(result.stdout)
+        if parsed is None:
+            logger.error(f"No valid JSON in CLI output: {result.stdout[:200]}")
             return None
 
-        return json.loads(json_str)
+        return parsed
+
     except subprocess.TimeoutExpired:
         logger.error(f"CLI timed out after {timeout}s")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e}")
         return None
     except FileNotFoundError:
         logger.error("z-ai CLI not found! Make sure z-ai is installed on the system.")
@@ -77,6 +111,7 @@ def handle_vision(data):
         return {"error": "Provide image_b64 or image_url"}
 
     if image_b64:
+        tmp_path = None
         try:
             if image_b64.startswith("data:"):
                 header, image_b64 = image_b64.split(",", 1)
@@ -89,9 +124,11 @@ def handle_vision(data):
                 tmp_path = f.name
 
             result = run_cli(["vision", "-p", prompt, "-i", tmp_path], timeout=90)
-            os.unlink(tmp_path)
         except Exception as e:
             return {"error": str(e)}
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     else:
         result = run_cli(["vision", "-p", prompt, "-i", image_url], timeout=90)
 
@@ -109,16 +146,23 @@ def handle_generate(data):
     if size not in valid_sizes:
         size = "1024x1024"
 
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        tmp_path = f.name
-
+    tmp_path = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+
         result = subprocess.run(
             ["z-ai", "image", "-p", prompt, "-o", tmp_path, "-s", size],
             capture_output=True, text=True, timeout=120,
         )
-        if result.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 1000:
+        if result.returncode != 0:
+            logger.error(f"Image gen CLI error: {result.stderr[:300]}")
             return {"error": "Image generation failed", "stderr": result.stderr[:300]}
+        if not os.path.exists(tmp_path):
+            return {"error": "Image generation failed — no output file"}
+        if os.path.getsize(tmp_path) < 1000:
+            os.unlink(tmp_path)
+            return {"error": "Image generation failed — output file too small"}
 
         with open(tmp_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -128,7 +172,7 @@ def handle_generate(data):
     except Exception as e:
         return {"error": str(e)}
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 

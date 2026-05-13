@@ -149,7 +149,7 @@ class MemoryManager:
 
     async def add_memory(self, user_id: str, guild_id: str, content: str):
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO memories (user_id, guild_id, content, timestamp) VALUES (?, ?, ?, ?)",
