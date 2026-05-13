@@ -1,103 +1,40 @@
-╔══════════════════════════════════════════════════════════════╗
-║     DRIPSLETONGUE v5.7 — ALL-IN-ONE UPDATE PACKAGE         ║
-║     Sidecar Fix + Dashboard Fix + OpenRouter Auto Router     ║
-╚══════════════════════════════════════════════════════════════╝
+DRIPSLETONGUE SETUP
+===================
 
-WHAT'S IN THIS UPDATE:
-─────────────────────
-1. Pure Python sidecar (no Node.js needed — fixes the Render deploy)
-2. Fixed dashboard HTML (personality presets + avatar upload actually work)
-3. Fixed api.py (all endpoints handle errors properly)
-4. OpenRouter Auto Router (auto-picks best model per prompt)
-5. LLM handler rewrite with auto-router + Z.ai integration
+This repository now contains the integrated Python bot, FastAPI dashboard, and
+Python Z.ai sidecar. There are no separate patch files to copy into place.
 
+Required environment variables:
+- DISCORD_TOKEN: Discord bot token.
+- OPENROUTER_API_KEY: Required for LLM responses and OpenRouter image models.
+- ZAI_API_KEY: Required only for Z.ai sidecar vision/search/image generation.
 
-STEP-BY-STEP DEPLOY:
-────────────────────
+Optional environment variables:
+- BOT_PREFIX: Prefix command marker, defaults to !.
+- DASHBOARD_PORT: Dashboard/API port, defaults to 8080.
+- ZAI_SIDECAR_PORT: Local sidecar port, defaults to 3456.
+- KEEP_ALIVE_URL: URL used by the built-in keep-alive ping loop.
 
-STEP 1: DELETE OLD FILES
-   - Delete the entire zai-sidecar/ folder (the old Node.js sidecar)
-   - You DO NOT need to change your Render build command or start command
-   - You DO NOT need Node.js installed
+Local setup:
+1. Install dependencies:
+   pip install -r requirements.txt
+2. Export the required environment variables.
+3. Start the bot:
+   python3 bot.py
 
-STEP 2: COPY NEW FILES TO PROJECT ROOT
-   Replace these files with the ones from this package:
-   
-   ┌─────────────────────┬──────────────────────────────────────────┐
-   │ FILE IN PACKAGE     │ WHERE IT GOES                            │
-   ├─────────────────────┼──────────────────────────────────────────┤
-   │ dashboard.html      │ Project root (replace old one)           │
-   │ api.py              │ Project root (replace old one)           │
-   │ llm.py              │ Project root (replace old one)           │
-   │ zai_sidecar.py      │ Project root (NEW FILE)                  │
-   └─────────────────────┴──────────────────────────────────────────┘
+Render setup:
+- Build command: pip install -r requirements.txt
+- Start command: python bot.py
+- The Python sidecar starts automatically from bot.py when zai_sidecar.py is
+  present.
 
-STEP 3: EDIT bot.py
-   Open bot_patch.py and follow the 3 steps:
-   
-   a) Add the imports at the top of bot.py
-   b) Replace the old sidecar startup block with the new one
-      (find the section that mentions "zai-sidecar" or "sidecar" and 
-       replace it with the code from STEP 2 in bot_patch.py)
-   c) That's it for bot.py
+Auto Router:
+- Manual model selection is used when auto_router_enabled is false.
+- When auto_router_enabled is true, OpenRouter receives openrouter/auto and the
+  optional auto_router_allowed_models list from settings.
 
-STEP 4: EDIT cogs/chat.py
-   Open chat_cog_patch.py and replace your LLM chat call section
-   with the updated code. This adds:
-   - Auto Router support
-   - Vision analysis for image attachments
-   - Web search enrichment
-   
-   Find where you call llm_handler.chat() and replace that block.
-
-STEP 5: EDIT config/default_settings.py
-   Add these two lines to your DEFAULT_SETTINGS dict:
-   
-     "auto_router_enabled": False,
-     "auto_router_allowed_models": [],
-
-STEP 6: COMMIT AND PUSH
-   git add -A
-   git commit -m "v5.7 - Pure Python sidecar + Auto Router + dashboard fix"
-   git push
-
-STEP 7: RENDER WILL AUTO-DEPLOY
-   - No build command changes needed
-   - No new env vars needed
-   - The sidecar starts automatically from bot.py
-   - Check logs for: "[Z.ai] Sidecar started on port 3456"
-
-
-WHAT THE AUTO ROUTER DOES:
-──────────────────────────
-Instead of hardcoding one model, set model to "openrouter/auto" and
-OpenRouter's AI analyzes each prompt and picks the best model:
-  - Simple questions → cheaper/faster model
-  - Complex reasoning → powerful model (Claude, GPT, etc.)
-  - No extra cost — you pay standard rates for whichever model is picked
-
-Dashboard has a toggle on the Models tab. When ON:
-  - Model selection grid dims out (auto handles it)
-  - You can filter which providers are allowed (Anthropic, OpenAI, etc.)
-  - Badge shows "AUTO ROUTER" in the header
-
-When OFF:
-  - Manual model selection works like before
-  - Click any model card to set it
-
-
-TROUBLESHOOTING:
-────────────────
-Q: "Sidecar crashed on start" in logs
-A: Make sure zai_sidecar.py is in your project root (same folder as bot.py)
-
-Q: Avatar upload returns "Discord rejected avatar"
-A: Bot tokens can't change avatars on bot accounts via the API.
-   You need to change it at https://discord.com/developers/applications
-
-Q: Personality presets don't load
-A: Check Render logs for 500 errors on /api/personality.
-   Make sure your settings_manager is initialized before the API starts.
-
-Q: Auto Router toggle doesn't save
-A: Make sure "auto_router_enabled" is in your default_settings.py
+Trainer:
+- To seed Markov data, set the target guild explicitly:
+  GUILD_ID=123456789012345678 python3 trainer.py
+  or
+  python3 trainer.py 123456789012345678

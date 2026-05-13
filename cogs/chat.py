@@ -76,6 +76,7 @@ IMAGE_FALSE_POSITIVES = [
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
+DEFAULT_LLM_MODEL = "meta-llama/llama-4-maverick:free"
 
 
 class Chat(commands.Cog):
@@ -113,6 +114,13 @@ class Chat(commands.Cog):
             if overlap >= FUZZY_DEDUP_THRESHOLD:
                 return True
         return False
+
+    def _llm_route(self, settings):
+        return {
+            "model": settings.get("llm_model") or settings.get("model", DEFAULT_LLM_MODEL),
+            "auto_router": bool(settings.get("auto_router_enabled", False)),
+            "allowed_models": settings.get("auto_router_allowed_models") or [],
+        }
 
     def _is_image_request(self, message_content):
         clean = re.sub(r'<@!?\d+>', '', message_content).strip()
@@ -234,8 +242,7 @@ class Chat(commands.Cog):
                 "You don't need to reply directly, but if a random thought "
                 "pops into your head, say it. If nothing, say NO_THOUGHT"
             )
-            chat_history.insert(0, {"role": "system", "content": prompt,
-                                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+            chat_history.insert(0, {"role": "system", "content": prompt, **self._llm_route(settings)})
             response = await generate_llm_response(prompt, chat_history)
             if response and "NO_THOUGHT" not in response.upper():
                 response = re.sub(r'^.{0,30}?:\s*', '', response).strip()
@@ -278,8 +285,7 @@ class Chat(commands.Cog):
                 "inside jokes, drama, key facts, and user dynamics from this "
                 "chat log. Keep it under 500 words."
             )
-            chat_history.insert(0, {"role": "system", "content": prompt,
-                                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+            chat_history.insert(0, {"role": "system", "content": prompt, **self._llm_route(settings)})
             summary = await generate_llm_response(prompt, chat_history)
             if summary:
                 await self.db.save_consolidated_memory(guild.id, {"summary": summary, "timestamp": time.time()})
@@ -555,8 +561,7 @@ class Chat(commands.Cog):
                         memory_str = "\n".join([f"- {m}" for m in user_memories])
                         dynamic_prompt += f"\n\nPermanent memories about {message.author.display_name}:\n{memory_str}\nBe a smart-ass about these."
 
-                    chat_history.insert(0, {"role": "system", "content": dynamic_prompt,
-                                        "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+                    chat_history.insert(0, {"role": "system", "content": dynamic_prompt, **self._llm_route(settings)})
 
                     llm_response = await generate_llm_response(dynamic_prompt, chat_history)
                     if llm_response:

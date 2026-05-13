@@ -1,15 +1,27 @@
 import asyncio
 import aiosqlite
 import json
+import os
+import sys
 from engine.markov import MarkovChain
 
 DB_PATH = "data/bot.db"
-GUILD_ID = 1388136234827649116  # Set your Discord Server ID here
+
+
+def _resolve_guild_id():
+    raw = os.environ.get("GUILD_ID") or (sys.argv[1] if len(sys.argv) > 1 else "")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+GUILD_ID = _resolve_guild_id()
 
 
 async def train():
     if not GUILD_ID:
-        print("ERROR: Please open trainer.py and set GUILD_ID to your Discord Server ID!")
+        print("ERROR: Set GUILD_ID in the environment or pass it as the first argument.")
         return
 
     try:
@@ -21,7 +33,15 @@ async def train():
 
     print(f"Found {len(lines)} lines of text. Starting training...")
 
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = await aiosqlite.connect(DB_PATH)
+    await conn.execute(
+        """CREATE TABLE IF NOT EXISTS markov (
+                                guild_id INTEGER,
+                                key TEXT,
+                                value TEXT,
+                                PRIMARY KEY (guild_id, key))"""
+    )
     chain = MarkovChain(order=2)
 
     # Load existing data from DB so we don't overwrite what the bot already knows
