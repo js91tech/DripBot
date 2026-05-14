@@ -90,6 +90,8 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="Rick Sanchez (Drunk Genius)", value="rick_sanchez"),
         app_commands.Choice(name="Bender (Rude Robot)", value="bender"),
         app_commands.Choice(name="The Brain (Megalomaniac)", value="the_brain"),
+        app_commands.Choice(name="Conquest (Viltrumite Warlord)", value="conquest"),
+        app_commands.Choice(name="Hannah (Chaotic Discord Energy)", value="hannah"),
     ])
     async def personality_switch(self, interaction: discord.Interaction, preset: app_commands.Choice[str]):
         update_data = build_personality_settings_update(preset.value)

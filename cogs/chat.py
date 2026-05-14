@@ -22,7 +22,7 @@ BASE_SECRET_PROMPT = (
     "DO NOT repeat generic filler phrases like 'idk', 'rn', 'fr', 'true'. "
     "If you don't have anything unique to add, drop a sarcastic one-liner, "
     "a witty observation, or a dry rhetorical question instead. "
-    "Keep responses between 2 and 4 sentences max. Be smart, but always a smart-ass about it."
+    "Keep replies very casual and short: one or two sentences at most. Be smart, but always a smart-ass about it."
 )
 
 FALLBACK_QUOTES = [
@@ -76,6 +76,14 @@ IMAGE_FALSE_POSITIVES = [
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
+MIN_REPLY_COOLDOWN_SECONDS = 5
+MAX_REPLY_CHARS = 240
+
+RESPONSE_STYLE_PROMPT = (
+    "GLOBAL REPLY STYLE: Keep every normal Discord reply very casual and short. "
+    "Use one or two sentences at most, no paragraphs, no lectures, and no assistant-like signoffs. "
+    "If the chat only needs a quick reaction, one short fragment is better than a full explanation."
+)
 
 
 class Chat(commands.Cog):
@@ -113,6 +121,37 @@ class Chat(commands.Cog):
             if overlap >= FUZZY_DEDUP_THRESHOLD:
                 return True
         return False
+
+    def _effective_cooldown_seconds(self, settings):
+        try:
+            configured = float(settings.get("cooldown_seconds", MIN_REPLY_COOLDOWN_SECONDS))
+        except (TypeError, ValueError):
+            configured = MIN_REPLY_COOLDOWN_SECONDS
+        return max(MIN_REPLY_COOLDOWN_SECONDS, configured)
+
+    def _cooldown_active(self, channel_id, settings):
+        last_reply_at = self.channel_cooldowns.get(channel_id)
+        if last_reply_at is None:
+            return False
+        return time.time() - last_reply_at < self._effective_cooldown_seconds(settings)
+
+    def _trim_reply(self, text):
+        """Keep LLM output in the casual 1-2 sentence shape requested for chat."""
+        if not text:
+            return text
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        text = " ".join(lines[:2]) if lines else text.strip()
+
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) > 2:
+            text = " ".join(sentences[:2]).strip()
+
+        if len(text) > MAX_REPLY_CHARS:
+            shortened = text[:MAX_REPLY_CHARS].rsplit(" ", 1)[0].strip()
+            text = shortened or text[:MAX_REPLY_CHARS].strip()
+
+        return text
 
     def _is_image_request(self, message_content):
         clean = re.sub(r'<@!?\d+>', '', message_content).strip()
@@ -232,7 +271,8 @@ class Chat(commands.Cog):
             prompt = (
                 "You just walked into the room and saw this conversation. "
                 "You don't need to reply directly, but if a random thought "
-                "pops into your head, say it. If nothing, say NO_THOUGHT"
+                "pops into your head, say it. If nothing, say NO_THOUGHT. "
+                + RESPONSE_STYLE_PROMPT
             )
             chat_history.insert(0, {"role": "system", "content": prompt,
                                 "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
@@ -240,6 +280,7 @@ class Chat(commands.Cog):
             if response and "NO_THOUGHT" not in response.upper():
                 response = re.sub(r'^.{0,30}?:\s*', '', response).strip()
                 response = re.sub(r'<@!?\d+>', '', response).strip()
+                response = self._trim_reply(response)
                 try:
                     await target_channel.send(sanitize_message(response))
                 except Exception:
@@ -390,9 +431,8 @@ class Chat(commands.Cog):
         if image_prompt:
             # Check cooldown
             skip_image = False
-            if channel_id in self.channel_cooldowns:
-                if time.time() - self.channel_cooldowns[channel_id] < settings["cooldown_seconds"]:
-                    skip_image = True
+            if self._cooldown_active(channel_id, settings):
+                skip_image = True
 
             if not skip_image:
                 # Only require mention/reply for image gen if zai_image_gen_enabled is on
@@ -472,9 +512,8 @@ class Chat(commands.Cog):
                     should_respond = True
 
         if should_respond:
-            if channel_id in self.channel_cooldowns:
-                if time.time() - self.channel_cooldowns[channel_id] < settings["cooldown_seconds"]:
-                    should_respond = False
+            if self._cooldown_active(channel_id, settings):
+                should_respond = False
 
         # EXECUTE RESPONSE
         if should_respond:
@@ -549,6 +588,7 @@ class Chat(commands.Cog):
                     consolidated = await self.db.get_consolidated_memory(guild_id)
 
                     dynamic_prompt = settings.get("personality_prompt", "") or BASE_SECRET_PROMPT
+                    dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
                     if consolidated and consolidated.get("summary"):
                         dynamic_prompt += f"\n\nCONTEXT OF SERVER CULTURE:\n{consolidated['summary']}\nUse this subtly."
                     if user_memories:
@@ -613,6 +653,8 @@ class Chat(commands.Cog):
                             final_content = random.choice(FALLBACK_QUOTES)
 
                 if final_content:
+                    if not use_gif:
+                        final_content = self._trim_reply(final_content)
                     try:
                         await message.channel.send(final_content, reference=reference)
                         self.channel_cooldowns[channel_id] = time.time()
