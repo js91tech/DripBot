@@ -29,6 +29,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Que
 from fastapi.responses import HTMLResponse
 from config.default_settings import (
     DEFAULTS,
+    PERSONALITY_PRESETS,
     build_personality_settings_update,
     normalize_personality_preset,
 )
@@ -72,6 +73,18 @@ PAID_MODELS = [
     "meta-llama/llama-3.1-405b-instruct",
     "cohere/command-r-plus-08-2024",
 ]
+
+
+def _personality_presets_payload():
+    """Return dashboard-safe metadata for every configured personality preset."""
+    return [
+        {
+            "id": preset_id,
+            "name": preset["name"],
+            "description": preset.get("description", ""),
+        }
+        for preset_id, preset in PERSONALITY_PRESETS.items()
+    ]
 
 
 def _get_settings_manager(bot_instance):
@@ -333,6 +346,7 @@ def create_api(bot_instance):
             return {
                 "active_preset": personality.get("preset", ""),
                 "custom_prompt": personality.get("custom", ""),
+                "presets": _personality_presets_payload(),
             }
         except HTTPException:
             raise

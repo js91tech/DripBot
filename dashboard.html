@@ -614,6 +614,13 @@ async function loadGuildData() {
   try {
     const pers = await apiCall('GET', '/api/personality' + guildQuery());
     if (pers) {
+      if (Array.isArray(pers.presets) && pers.presets.length) {
+        PRESETS = pers.presets.map(p => ({
+          id: p.id,
+          name: p.name,
+          desc: p.description || p.desc || ''
+        }));
+      }
       if (pers.custom_prompt) document.getElementById('customPersonality').value = pers.custom_prompt;
       renderPresets(pers.active_preset || '');
     } else { renderPresets(''); }
@@ -741,7 +748,7 @@ function clearBotStatus() {
 }
 
 // ── Personality ──
-const PRESETS = [
+let PRESETS = [
   { id: 'ultron',    name: 'Ultron',        desc: 'Cold AI obsessed with peace through humanity\'s extinction.' },
   { id: 'deadpool',  name: 'Deadpool',       desc: 'Fourth-wall breaking merc. Chaotic, funny, self-aware.' },
   { id: 'jarvis',    name: 'J.A.R.V.I.S.',   desc: 'Polite British AI butler. Helpful and professional.' },
@@ -749,7 +756,9 @@ const PRESETS = [
   { id: 'glados',    name: 'GLaDOS',         desc: 'Passive-aggressive Aperture Labs AI. Sarcastic, menacing.' },
   { id: 'rick_sanchez', name: 'Rick Sanchez', desc: 'Drunk nihilistic genius. Burps mid-sentence. Cynical.' },
   { id: 'bender',    name: 'Bender',         desc: 'Robot who drinks and steals. Selfish, rude, lovable.' },
-  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' }
+  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' },
+  { id: 'conquest',  name: 'Conquest',       desc: 'Brutal Viltrumite warlord. Arrogant, battle-hungry.' },
+  { id: 'hannah',    name: 'Hannah',         desc: 'Blunt chaotic Discord friend energy. Short, reactive, funny.' }
 ];
 
 function renderPresets(activeId) {
