@@ -229,23 +229,23 @@
   /* Personality Presets */
   .presets-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
     margin-bottom: 16px;
   }
   .preset-card {
     background: var(--bg-secondary);
     border: 2px solid var(--border);
     border-radius: var(--radius);
-    padding: 14px;
+    padding: 12px;
     cursor: pointer;
     transition: all 0.2s;
     text-align: left;
   }
   .preset-card:hover { border-color: var(--accent); background: var(--bg-card-hover); transform: translateY(-2px); }
   .preset-card.active { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
-  .preset-card .preset-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-  .preset-card .preset-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+  .preset-card .preset-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .preset-card .preset-desc { font-size: 10px; color: var(--text-secondary); line-height: 1.35; }
   .custom-personality-section textarea,
   .status-input {
     width: 100%;
@@ -614,7 +614,14 @@ async function loadGuildData() {
   try {
     const pers = await apiCall('GET', '/api/personality' + guildQuery());
     if (pers) {
-      if (pers.custom_prompt) document.getElementById('customPersonality').value = pers.custom_prompt;
+      if (Array.isArray(pers.presets) && pers.presets.length) {
+        PRESETS = pers.presets.map(p => ({
+          id: p.id,
+          name: p.name,
+          desc: p.description || p.desc || ''
+        }));
+      }
+      document.getElementById('customPersonality').value = pers.custom_prompt || '';
       renderPresets(pers.active_preset || '');
     } else { renderPresets(''); }
   } catch(e) { renderPresets(''); }
@@ -741,7 +748,7 @@ function clearBotStatus() {
 }
 
 // ── Personality ──
-const PRESETS = [
+let PRESETS = [
   { id: 'ultron',    name: 'Ultron',        desc: 'Cold AI obsessed with peace through humanity\'s extinction.' },
   { id: 'deadpool',  name: 'Deadpool',       desc: 'Fourth-wall breaking merc. Chaotic, funny, self-aware.' },
   { id: 'jarvis',    name: 'J.A.R.V.I.S.',   desc: 'Polite British AI butler. Helpful and professional.' },
@@ -749,7 +756,9 @@ const PRESETS = [
   { id: 'glados',    name: 'GLaDOS',         desc: 'Passive-aggressive Aperture Labs AI. Sarcastic, menacing.' },
   { id: 'rick_sanchez', name: 'Rick Sanchez', desc: 'Drunk nihilistic genius. Burps mid-sentence. Cynical.' },
   { id: 'bender',    name: 'Bender',         desc: 'Robot who drinks and steals. Selfish, rude, lovable.' },
-  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' }
+  { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' },
+  { id: 'conquest',  name: 'Conquest',       desc: 'Brutal Viltrumite warlord. Arrogant, battle-hungry.' },
+  { id: 'hannah',    name: 'Hannah',         desc: 'Blunt chaotic Discord friend energy. Short, reactive, funny.' }
 ];
 
 function renderPresets(activeId) {
@@ -767,7 +776,7 @@ async function selectPreset(id) {
   showToast('Applying ' + preset.name + '...', 'info');
   const result = await apiCall('POST', '/api/personality', { name: id, guild_id: getGuildId() });
   if (result) {
-    renderPresets(id);
+    renderPresets(result.active_preset || id);
     showToast('Preset applied: ' + preset.name, 'success');
     document.getElementById('customPersonality').value = '';
   }
@@ -779,7 +788,7 @@ async function saveCustomPersonality() {
   showToast('Saving custom personality...', 'info');
   const result = await apiCall('POST', '/api/personality', { custom: prompt, guild_id: getGuildId() });
   if (result) {
-    renderPresets('');
+    renderPresets(result.active_preset || '');
     showToast('Custom personality saved!', 'success');
   }
 }
