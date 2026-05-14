@@ -25,7 +25,7 @@ logger = logging.getLogger("dripsletongue")
 TOKEN = os.environ.get("DISCORD_TOKEN", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 BOT_PREFIX = os.environ.get("BOT_PREFIX", "!")
-DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", 8080))
+DASHBOARD_PORT = int(os.environ.get("PORT") or os.environ.get("DASHBOARD_PORT", 8080))
 SIDECAR_PORT = int(os.environ.get("ZAI_SIDECAR_PORT", 3456))
 
 if not TOKEN:
