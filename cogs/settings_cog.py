@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from config.default_settings import (
     DEFAULTS,
+    PERSONALITY_PRESETS,
     VALIDATORS,
     build_personality_settings_update,
     normalize_personality_preset,
@@ -11,6 +12,25 @@ from engine.markov import MarkovChain
 from utils import sanitize_message
 from llm import generate_llm_response, parse_settings_command
 import json
+
+
+def _personality_choices():
+    labels = {
+        "ultron": "Ultron (Sarcastic Smart-Ass)",
+        "deadpool": "Deadpool (Chaotic 4th-Wall)",
+        "jarvis": "J.A.R.V.I.S. (British Butler)",
+        "tony_stark": "Tony Stark (Arrogant Genius)",
+        "glados": "GLaDOS (Passive-Aggressive)",
+        "rick_sanchez": "Rick Sanchez (Drunk Genius)",
+        "bender": "Bender (Rude Robot)",
+        "the_brain": "The Brain (Megalomaniac)",
+        "conquest": "Conquest (Viltrumite Warlord)",
+        "hannah": "Hannah (Chaotic Discord Energy)",
+    }
+    return [
+        app_commands.Choice(name=labels.get(preset_id, preset["name"]), value=preset_id)
+        for preset_id, preset in PERSONALITY_PRESETS.items()
+    ]
 
 
 class SettingsCog(commands.Cog):
@@ -81,18 +101,7 @@ class SettingsCog(commands.Cog):
     # ==========================================
     @group.command(name="personality", description="Switch the bot's personality preset")
     @app_commands.describe(preset="Choose a personality preset")
-    @app_commands.choices(preset=[
-        app_commands.Choice(name="Ultron (Sarcastic Smart-Ass)", value="ultron"),
-        app_commands.Choice(name="Deadpool (Chaotic 4th-Wall)", value="deadpool"),
-        app_commands.Choice(name="J.A.R.V.I.S. (British Butler)", value="jarvis"),
-        app_commands.Choice(name="Tony Stark (Arrogant Genius)", value="tony_stark"),
-        app_commands.Choice(name="GLaDOS (Passive-Aggressive)", value="glados"),
-        app_commands.Choice(name="Rick Sanchez (Drunk Genius)", value="rick_sanchez"),
-        app_commands.Choice(name="Bender (Rude Robot)", value="bender"),
-        app_commands.Choice(name="The Brain (Megalomaniac)", value="the_brain"),
-        app_commands.Choice(name="Conquest (Viltrumite Warlord)", value="conquest"),
-        app_commands.Choice(name="Hannah (Chaotic Discord Energy)", value="hannah"),
-    ])
+    @app_commands.choices(preset=_personality_choices())
     async def personality_switch(self, interaction: discord.Interaction, preset: app_commands.Choice[str]):
         update_data = build_personality_settings_update(preset.value)
         if not update_data:
@@ -247,6 +256,18 @@ class SettingsCog(commands.Cog):
     @app_commands.autocomplete(key=setting_autocomplete)
     async def set_setting(self, interaction: discord.Interaction, key: str, value: str):
         key = key.lower()
+        if key in {"personality", "personality_preset"}:
+            preset_id = normalize_personality_preset(value)
+            update_data = build_personality_settings_update(preset_id)
+            if not update_data:
+                await interaction.response.send_message(f"Unknown personality preset: `{value}`", ephemeral=True)
+                return
+            await self.settings_manager.update_settings(interaction.guild.id, update_data)
+            await interaction.response.send_message(
+                f"Personality switched to **{update_data['personality_name']}**",
+                ephemeral=True,
+            )
+            return
         if key not in DEFAULTS:
             await interaction.response.send_message(f"Invalid setting key: `{key}`", ephemeral=True)
             return

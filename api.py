@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse
 from config.default_settings import (
     DEFAULTS,
     PERSONALITY_PRESETS,
+    build_custom_personality_settings_update,
     build_personality_settings_update,
     normalize_personality_preset,
 )
@@ -85,6 +86,29 @@ def _personality_presets_payload():
         }
         for preset_id, preset in PERSONALITY_PRESETS.items()
     ]
+
+
+def _personality_response(settings=None):
+    """Return the dashboard personality state plus the canonical preset list."""
+    settings = settings or {}
+    personality = settings.get("personality", {})
+    legacy_preset = ""
+    if isinstance(personality, str):
+        legacy_preset = normalize_personality_preset(personality) or ""
+        personality = {}
+    elif not isinstance(personality, dict):
+        personality = {}
+
+    active_preset = personality.get("preset", "") or legacy_preset
+    custom_prompt = personality.get("custom", "")
+    if not active_preset and not custom_prompt and settings.get("personality_name") == "Custom":
+        custom_prompt = settings.get("personality_prompt", "")
+
+    return {
+        "active_preset": active_preset,
+        "custom_prompt": custom_prompt,
+        "presets": _personality_presets_payload(),
+    }
 
 
 def _get_settings_manager(bot_instance):
@@ -175,7 +199,13 @@ def create_api(bot_instance):
         html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
         if os.path.exists(html_path):
             with open(html_path, "r", encoding="utf-8") as f:
-                return HTMLResponse(f.read())
+                return HTMLResponse(
+                    f.read(),
+                    headers={
+                        "Cache-Control": "no-store, max-age=0",
+                        "Pragma": "no-cache",
+                    },
+                )
         return HTMLResponse("<h1>dashboard.html not found</h1>", status_code=500)
 
     # -- Guilds (Server Selector) --
@@ -340,14 +370,10 @@ def create_api(bot_instance):
         try:
             sm, err = _get_settings_manager(bot_instance)
             if err:
-                raise err
+                return _personality_response()
             gid = _resolve_guild_id(bot_instance, sm, guild_id)
-            personality = sm.settings[gid].get("personality", {})
-            return {
-                "active_preset": personality.get("preset", ""),
-                "custom_prompt": personality.get("custom", ""),
-                "presets": _personality_presets_payload(),
-            }
+            settings = await sm.get_settings(gid)
+            return _personality_response(settings)
         except HTTPException:
             raise
         except Exception as e:
@@ -363,10 +389,6 @@ def create_api(bot_instance):
                 raise err
             gid_param = body.get("guild_id")
             gid = _resolve_guild_id(bot_instance, sm, gid_param)
-            settings = sm.settings[gid]
-
-            if "personality" not in settings:
-                settings["personality"] = {}
 
             preset_name = body.get("name")
             custom_prompt = body.get("custom")
@@ -375,17 +397,16 @@ def create_api(bot_instance):
                 preset_id = normalize_personality_preset(preset_name)
                 if not preset_id:
                     raise HTTPException(400, detail=f"Unknown preset: {preset_name}")
-                settings.update(build_personality_settings_update(preset_id))
-            elif custom_prompt:
-                settings["personality"]["preset"] = ""
-                settings["personality"]["custom"] = custom_prompt
-                settings["personality"]["system_prompt"] = custom_prompt
-                # Sync flat key for cog compat
-                settings["personality_prompt"] = custom_prompt
-                settings["personality_name"] = "Custom"
+                settings = await sm.update_settings(gid, build_personality_settings_update(preset_id))
+            elif custom_prompt is not None:
+                update_data = build_custom_personality_settings_update(custom_prompt)
+                if not update_data:
+                    raise HTTPException(400, detail="Custom personality prompt cannot be empty")
+                settings = await sm.update_settings(gid, update_data)
+            else:
+                raise HTTPException(400, detail="Provide a personality preset name or custom prompt")
 
-            await sm.save_settings(gid)
-            return {"success": True, "personality": settings["personality"]}
+            return {"success": True, "personality": settings["personality"], **_personality_response(settings)}
         except HTTPException:
             raise
         except Exception as e:

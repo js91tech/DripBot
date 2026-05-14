@@ -201,6 +201,24 @@ def build_personality_settings_update(preset_id):
     }
 
 
+def build_custom_personality_settings_update(custom_prompt):
+    """Build the nested and flat settings required for a custom personality prompt."""
+    if custom_prompt is None:
+        return None
+    prompt = str(custom_prompt).strip()
+    if not prompt:
+        return None
+    return {
+        "personality_prompt": prompt,
+        "personality_name": "Custom",
+        "personality": {
+            "preset": "",
+            "custom": prompt,
+            "system_prompt": prompt,
+        },
+    }
+
+
 DEFAULT_SETTINGS = {
     # ── Core ──
     "brain_mode": "llm",

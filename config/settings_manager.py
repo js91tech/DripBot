@@ -1,4 +1,8 @@
-from config.default_settings import DEFAULTS
+from config.default_settings import (
+    DEFAULTS,
+    build_custom_personality_settings_update,
+    build_personality_settings_update,
+)
 import copy
 
 
@@ -25,10 +29,43 @@ class SettingsManager:
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
                 self.cache[guild_id] = full_settings
+                if self._normalize_personality_settings(self.cache[guild_id]):
+                    await self.db.save_settings(guild_id, self.cache[guild_id])
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
                 await self.db.save_settings(guild_id, self.cache[guild_id])
         return self.cache[guild_id]
+
+    def _normalize_personality_settings(self, settings):
+        """Repair legacy or manually-set personality values into the supported shape."""
+        personality = settings.get("personality", {})
+        if isinstance(personality, str):
+            update_data = build_personality_settings_update(personality)
+            if not update_data:
+                return False
+            settings.update(update_data)
+            return True
+
+        if not isinstance(personality, dict):
+            return False
+
+        preset_id = personality.get("preset")
+        update_data = build_personality_settings_update(preset_id)
+        if update_data and settings.get("personality_prompt") != update_data["personality_prompt"]:
+            settings.update(update_data)
+            return True
+
+        custom_prompt = personality.get("custom") or personality.get("system_prompt")
+        update_data = build_custom_personality_settings_update(custom_prompt)
+        if (
+            update_data
+            and not preset_id
+            and settings.get("personality_prompt") != update_data["personality_prompt"]
+        ):
+            settings.update(update_data)
+            return True
+
+        return False
 
     async def save_settings(self, guild_id, settings_dict=None):
         """
@@ -45,6 +82,8 @@ class SettingsManager:
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
                 self.cache[guild_id].update(settings_dict)
+        if guild_id in self.cache:
+            self._normalize_personality_settings(self.cache[guild_id])
         await self.db.save_settings(guild_id, self.cache.get(guild_id, {}))
 
     async def set_setting(self, guild_id, key, value):
