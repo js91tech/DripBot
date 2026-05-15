@@ -305,6 +305,7 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="Vision (Z.ai)", value="vision_enabled"),
         app_commands.Choice(name="Web Search (Z.ai)", value="web_search_enabled"),
         app_commands.Choice(name="Z.ai Image Gen", value="zai_image_gen_enabled"),
+        app_commands.Choice(name="Markov Chains", value="markov_enabled"),
     ])
     async def toggle_setting(self, interaction: discord.Interaction, setting: app_commands.Choice[str]):
         settings = await self.settings_manager.get_settings(interaction.guild.id)

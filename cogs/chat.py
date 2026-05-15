@@ -76,6 +76,7 @@ IMAGE_FALSE_POSITIVES = [
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
+ECHO_TRIGGER_OVERLAP = 0.55
 MIN_REPLY_COOLDOWN_SECONDS = 5
 MAX_REPLY_CHARS = 240
 
@@ -106,6 +107,30 @@ class Chat(commands.Cog):
     async def cog_unload(self):
         self.proactive_loop.cancel()
         self.memory_consolidation_loop.cancel()
+
+    def _uses_llm(self, settings):
+        return settings.get("brain_mode", "llm") == "llm"
+
+    def _markov_enabled(self, settings):
+        return settings.get("markov_enabled", True)
+
+    def _echoes_trigger(self, generated, trigger_text):
+        if not generated or not trigger_text:
+            return False
+        gen_clean = generated.lower().strip()
+        trig_clean = trigger_text.lower().strip()
+        if not gen_clean or not trig_clean:
+            return False
+        if gen_clean == trig_clean:
+            return True
+        if trig_clean in gen_clean or gen_clean in trig_clean:
+            return True
+        gen_words = set(gen_clean.split())
+        trig_words = set(trig_clean.split())
+        if len(trig_words) < 2:
+            return False
+        overlap = len(gen_words & trig_words) / len(trig_words)
+        return overlap >= ECHO_TRIGGER_OVERLAP
 
     def _is_fuzzy_duplicate(self, text, guild_id):
         text_words = set(text.lower().split())
@@ -239,7 +264,8 @@ class Chat(commands.Cog):
             if random.random() > 0.16:
                 continue
             settings = await self.settings_manager.get_settings(guild.id)
-            if settings.get("brain_mode") != "llm" or not settings.get("response_enabled"):
+            if (not settings.get("proactive_enabled", False) or not self._uses_llm(settings)
+                    or not settings.get("response_enabled")):
                 continue
             target_channel = None
             allowed = settings.get("allowed_channels", [])
@@ -333,20 +359,20 @@ class Chat(commands.Cog):
                 self.chains[guild_id].from_db_dict(raw_chain)
         return self.chains[guild_id]
 
-    def _generate_unique_markov(self, chain, seed, trigger_text, guild_id, min_words, max_words):
+    def _generate_unique_markov(self, chain, trigger_text, guild_id, min_words, max_words):
         recent_bot_msgs = self.bot_recent_messages.get(guild_id, [])
         response = None
-        for _ in range(5):
-            generated = chain.generate(min_words=min_words, max_words=max_words, seed=seed)
-            if generated:
-                gen_clean = generated.lower().strip()
-                trig_clean = trigger_text.lower().strip()
-                if gen_clean == trig_clean:
-                    continue
-                if gen_clean in recent_bot_msgs:
-                    continue
-                response = generated
-                break
+        for _ in range(8):
+            generated = chain.generate(min_words=min_words, max_words=max_words, seed=None)
+            if not generated:
+                continue
+            gen_clean = generated.lower().strip()
+            if self._echoes_trigger(generated, trigger_text):
+                continue
+            if gen_clean in recent_bot_msgs:
+                continue
+            response = generated
+            break
         if response:
             if guild_id not in self.bot_recent_messages:
                 self.bot_recent_messages[guild_id] = []
@@ -380,6 +406,14 @@ class Chat(commands.Cog):
                 target_channel_id = int(os.getenv("OWNER_TARGET_CHANNEL_ID", "0"))
                 if target_channel_id != 0:
                     target_channel = self.bot.get_channel(target_channel_id)
+                    puppet_enabled = True
+                    if target_channel and getattr(target_channel, "guild", None):
+                        puppet_settings = await self.settings_manager.get_settings(
+                            target_channel.guild.id
+                        )
+                        puppet_enabled = puppet_settings.get("puppet_enabled", True)
+                    if not puppet_enabled:
+                        return
                     if target_channel:
                         try:
                             await target_channel.send(message.content)
@@ -408,7 +442,8 @@ class Chat(commands.Cog):
         if is_bot and not settings["learn_from_bots"]:
             return
 
-        if settings["learning_enabled"] and not message.content.startswith("/"):
+        if (settings["learning_enabled"] and self._markov_enabled(settings)
+                and not message.content.startswith("/")):
             chain = await self.get_chain(guild_id, settings["markov_order"])
             chain.learn(message.content)
             words = message.content.lower().split()
@@ -538,8 +573,7 @@ class Chat(commands.Cog):
                 final_content = None
                 reference = message if use_reply else None
 
-                if (settings.get("brain_mode") == "llm" or "llama" in settings.get(
-                        "llm_model", "") or "hermes" in settings.get("llm_model", "")) and not use_gif:
+                if self._uses_llm(settings) and not use_gif:
                     chat_history = []
                     prev_msg_time = None
                     async for msg in message.channel.history(limit=100):
@@ -584,8 +618,11 @@ class Chat(commands.Cog):
                             trigger_payload.append({"type": "image_url", "image_url": {"url": att.url}})
                     chat_history.append({"role": "user", "content": trigger_payload})
 
-                    user_memories = await self.db.get_memories(guild_id, message.author.id)
-                    consolidated = await self.db.get_consolidated_memory(guild_id)
+                    user_memories = []
+                    consolidated = None
+                    if settings.get("memory_enabled", True):
+                        user_memories = await self.db.get_memories(guild_id, message.author.id)
+                        consolidated = await self.db.get_consolidated_memory(guild_id)
 
                     dynamic_prompt = settings.get("personality_prompt", "") or BASE_SECRET_PROMPT
                     dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
@@ -618,15 +655,18 @@ class Chat(commands.Cog):
                         print(f"[{guild_id}] LLM returned None.")
 
                     if not final_content:
-                        chain = await self.get_chain(guild_id, settings["markov_order"])
-                        response = self._generate_unique_markov(
-                            chain, message.content, message.content, guild_id,
-                            settings["min_response_words"], settings["max_response_words"])
-                        if response:
-                            base_text = f"{settings['personality_prefix']} {response}".strip()
-                            base_text = sanitize_message(base_text)
-                            final_content = f"{message.author.mention} {base_text}" if use_mention else base_text
-                        else:
+                        if self._markov_enabled(settings):
+                            chain = await self.get_chain(guild_id, settings["markov_order"])
+                            response = self._generate_unique_markov(
+                                chain, message.content, guild_id,
+                                settings["min_response_words"], settings["max_response_words"])
+                            if response:
+                                base_text = f"{settings['personality_prefix']} {response}".strip()
+                                base_text = sanitize_message(base_text)
+                                final_content = (
+                                    f"{message.author.mention} {base_text}" if use_mention else base_text
+                                )
+                        if not final_content:
                             final_content = random.choice(FALLBACK_QUOTES)
 
                 else:
@@ -640,16 +680,19 @@ class Chat(commands.Cog):
                         else:
                             use_gif = False
                     if not use_gif:
-                        chain = await self.get_chain(guild_id, settings["markov_order"])
-                        response = self._generate_unique_markov(
-                            chain, message.content, message.content, guild_id,
-                            settings["min_response_words"], settings["max_response_words"])
-                        if response:
-                            prefix = settings["personality_prefix"]
-                            base_text = f"{prefix} {response}".strip()
-                            base_text = sanitize_message(base_text)
-                            final_content = f"{message.author.mention} {base_text}" if use_mention else base_text
-                        else:
+                        if self._markov_enabled(settings):
+                            chain = await self.get_chain(guild_id, settings["markov_order"])
+                            response = self._generate_unique_markov(
+                                chain, message.content, guild_id,
+                                settings["min_response_words"], settings["max_response_words"])
+                            if response:
+                                prefix = settings["personality_prefix"]
+                                base_text = f"{prefix} {response}".strip()
+                                base_text = sanitize_message(base_text)
+                                final_content = (
+                                    f"{message.author.mention} {base_text}" if use_mention else base_text
+                                )
+                        if not final_content:
                             final_content = random.choice(FALLBACK_QUOTES)
 
                 if final_content:
