@@ -749,6 +749,7 @@ function clearBotStatus() {
 
 // ── Personality ──
 let PRESETS = [
+  { id: 'hannah',    name: 'Hannah (Default)', desc: 'Blunt chaotic Discord friend energy. Short, reactive, funny.' },
   { id: 'ultron',    name: 'Ultron',        desc: 'Cold AI obsessed with peace through humanity\'s extinction.' },
   { id: 'deadpool',  name: 'Deadpool',       desc: 'Fourth-wall breaking merc. Chaotic, funny, self-aware.' },
   { id: 'jarvis',    name: 'J.A.R.V.I.S.',   desc: 'Polite British AI butler. Helpful and professional.' },
@@ -758,7 +759,6 @@ let PRESETS = [
   { id: 'bender',    name: 'Bender',         desc: 'Robot who drinks and steals. Selfish, rude, lovable.' },
   { id: 'the_brain', name: 'The Brain',      desc: 'Lab mouse plotting world domination. Elaborate schemes.' },
   { id: 'conquest',  name: 'Conquest',       desc: 'Brutal Viltrumite warlord. Arrogant, battle-hungry.' },
-  { id: 'hannah',    name: 'Hannah',         desc: 'Blunt chaotic Discord friend energy. Short, reactive, funny.' }
 ];
 
 function renderPresets(activeId) {
@@ -903,7 +903,6 @@ async function selectModel(model) {
 const SETTINGS = [
   { key: 'response_enabled',    label: 'Chat Responses',     desc: 'Bot responds to messages in channels' },
   { key: 'proactive_enabled',   label: 'Proactive Messages',  desc: 'Bot sends unprompted messages periodically' },
-  { key: 'markov_enabled',      label: 'Markov Chains',      desc: 'Generate responses using Markov chain fallback' },
   { key: 'memory_enabled',      label: 'Memory System',      desc: 'Bot remembers past conversations per user' },
   { key: 'vision_enabled',      label: 'Vision Analysis',    desc: 'Analyze images using Z.ai (requires sidecar)' },
   { key: 'web_search_enabled',  label: 'Web Search',         desc: 'Enrich responses with web search results' },

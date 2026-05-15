@@ -243,13 +243,11 @@ async def imagine(ctx, *, prompt: str = None):
 @bot.command(name="reset")
 async def reset_personality(ctx):
     """Reset personality to default."""
+    from config.default_settings import build_personality_settings_update
     guild_id = ctx.guild.id if ctx.guild else 0
-    await settings_manager.update_settings(guild_id, {
-        "personality_prompt": "",
-        "personality_name": "Ultron",
-        "personality": {},
-    })
-    await ctx.send("Personality reset to default.")
+    update = build_personality_settings_update("hannah")
+    await settings_manager.update_settings(guild_id, update)
+    await ctx.send("Personality reset to **Hannah** (default).")
 
 
 # ═══════════════════════════════════════════════════════════════
