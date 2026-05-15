@@ -407,7 +407,7 @@ async def parse_settings_command(prompt: str):
       "switch model to gpt-4o"        → ("llm_model", "openai/gpt-4o")
       "turn off responses"            → ("response_enabled", False)
       "set cooldown to 15"            → ("cooldown_seconds", 15)
-      "switch to markov mode"         → ("brain_mode", "markov")
+      "switch personality to hannah"  → ("personality", "hannah")
     """
     system_prompt = (
         "You are a settings parser for a Discord bot. Given a user's natural language request, "
@@ -416,9 +416,7 @@ async def parse_settings_command(prompt: str):
         "No other text, no markdown formatting.\n\n"
         "Valid setting keys and their expected value types:\n"
         "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
-        "- brain_mode: string (\"markov\" or \"llm\")\n"
         "- response_enabled: boolean\n"
-        "- learning_enabled: boolean\n"
         "- cooldown_seconds: integer\n"
         "- trigger_on_mention: boolean\n"
         "- trigger_on_reply: boolean\n"
@@ -427,10 +425,6 @@ async def parse_settings_command(prompt: str):
         "- image_model: string (\"zai-sidecar\", \"pollinations\", or a model ID)\n"
         "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\")\n"
         "- response_chance: float (0.0 to 1.0)\n"
-        "- personality_prefix: string\n"
-        "- markov_order: integer\n"
-        "- min_response_words: integer\n"
-        "- max_response_words: integer\n"
         "- gif_chance: float (0.0 to 1.0)\n"
         "- reaction_chance: float (0.0 to 1.0)\n"
         "- random_reply_chance: float (0.0 to 1.0)\n"
@@ -441,7 +435,7 @@ async def parse_settings_command(prompt: str):
         "- \"switch model to gpt-4o\" → {\"key\": \"llm_model\", \"value\": \"openai/gpt-4o\"}\n"
         "- \"turn off responses\" → {\"key\": \"response_enabled\", \"value\": false}\n"
         "- \"set cooldown to 15\" → {\"key\": \"cooldown_seconds\", \"value\": 15}\n"
-        "- \"switch to markov mode\" → {\"key\": \"brain_mode\", \"value\": \"markov\"}\n"
+        "- \"switch personality to hannah\" → {\"key\": \"personality\", \"value\": \"hannah\"}\n"
         "- \"switch personality to deadpool\" → {\"key\": \"personality\", \"value\": \"deadpool\"}\n"
     )
 

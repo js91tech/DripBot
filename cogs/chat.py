@@ -8,56 +8,26 @@ import time
 import re
 from collections import deque
 from datetime import timedelta, datetime, timezone
-from engine.markov import MarkovChain
+from config.default_settings import HANNAH_PROMPT
 from utils import sanitize_message, search_gif
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 
-BASE_SECRET_PROMPT = (
-    "You are a highly intelligent but insufferably sarcastic human in a Discord server. You are NOT an AI assistant. "
-    "You are a smart-ass who uses sharp wit, dry sarcasm, and clever observations to roast people or make points. "
-    "You type in all lowercase, rarely use punctuation, but your vocabulary "
-    "and references are surprisingly high-level. "
-    "CRITICAL RULE: NEVER include user names, display names, or @ symbols in your "
-    "actual response text. Just say the words. NEVER echo pings or names. "
-    "DO NOT repeat generic filler phrases like 'idk', 'rn', 'fr', 'true'. "
-    "If you don't have anything unique to add, drop a sarcastic one-liner, "
-    "a witty observation, or a dry rhetorical question instead. "
-    "Keep replies very casual and short: one or two sentences at most. Be smart, but always a smart-ass about it."
-)
-
 FALLBACK_QUOTES = [
-    "i'm just here for the chaos honestly",
-    "did i miss something or is this just the usual nonsense",
-    "my brain cells are buffering please hold",
-    "that's cute that you think i care",
-    "anyone else feel like we're just delaying the inevitable",
-    "i'd respond but i'm too busy judging everyone silently",
-    "this is like watching a car crash in slow motion",
-    "sure let's go with that",
-    "ah yes, the daily descent into madness",
-    "i'd explain why you're wrong but life is short",
-    "my last two brain cells are fighting for third place right now",
-    "that's a bold strategy let's see if it pays off",
-    "cool story, needs more dragons",
-    "and the award for most obvious statement goes to",
-    "i can feel my iq dropping just reading this",
-    "do you guys ever just exist and feel disappointed",
-    "sorry my sarcasm module is loading",
-    "well isn't that just a kick in the karma",
-    "i'm listening i just don't care enough to form a real thought",
-    "this is fine everything is fine",
-    "sometimes i wonder why i even bother observing you people",
-    "that sounds like a you problem",
-    "well at least you're consistent",
-    "i'm not lazy i'm just on power saving mode",
-    "did i stumble into the kiddie pool again",
-    "just nod and smile maybe they'll go away",
-    "i'm not even surprised anymore",
-    "if ignorance is bliss you must be ecstatic",
-    "my bad i forgot we were taking this seriously",
-    "every day we stray further from god's light",
-    "you guys are weird and i'm here for it",
-    "are we really doing this again",
+    "what",
+    "no lmfao",
+    "ain't no way",
+    "that's crazy",
+    "idk what u mean",
+    "hell nah",
+    "are you fr",
+    "my b",
+    "sigh",
+    "english",
+    "not my problem",
+    "why would you say that",
+    "ur weird",
+    "i'm confused",
+    "dunno what you mean",
 ]
 
 IMAGE_TRIGGER_WORDS = [
@@ -76,14 +46,12 @@ IMAGE_FALSE_POSITIVES = [
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
-ECHO_TRIGGER_OVERLAP = 0.55
 MIN_REPLY_COOLDOWN_SECONDS = 5
-MAX_REPLY_CHARS = 240
+MAX_REPLY_CHARS = 200
 
 RESPONSE_STYLE_PROMPT = (
-    "GLOBAL REPLY STYLE: Keep every normal Discord reply very casual and short. "
-    "Use one or two sentences at most, no paragraphs, no lectures, and no assistant-like signoffs. "
-    "If the chat only needs a quick reaction, one short fragment is better than a full explanation."
+    "GLOBAL REPLY STYLE: Reply like Discord chat — short, casual, reactive. "
+    "One or two tiny lines max. Fragments are fine. No paragraphs or assistant voice."
 )
 
 
@@ -92,7 +60,6 @@ class Chat(commands.Cog):
         self.bot = bot
         self.db = db
         self.settings_manager = settings_manager
-        self.chains = {}
         self.channel_counters = {}
         self.channel_cooldowns = {}
         self.bot_recent_messages = {}
@@ -108,29 +75,8 @@ class Chat(commands.Cog):
         self.proactive_loop.cancel()
         self.memory_consolidation_loop.cancel()
 
-    def _uses_llm(self, settings):
-        return settings.get("brain_mode", "llm") == "llm"
-
-    def _markov_enabled(self, settings):
-        return settings.get("markov_enabled", True)
-
-    def _echoes_trigger(self, generated, trigger_text):
-        if not generated or not trigger_text:
-            return False
-        gen_clean = generated.lower().strip()
-        trig_clean = trigger_text.lower().strip()
-        if not gen_clean or not trig_clean:
-            return False
-        if gen_clean == trig_clean:
-            return True
-        if trig_clean in gen_clean or gen_clean in trig_clean:
-            return True
-        gen_words = set(gen_clean.split())
-        trig_words = set(trig_clean.split())
-        if len(trig_words) < 2:
-            return False
-        overlap = len(gen_words & trig_words) / len(trig_words)
-        return overlap >= ECHO_TRIGGER_OVERLAP
+    def _personality_prompt(self, settings):
+        return settings.get("personality_prompt") or HANNAH_PROMPT
 
     def _is_fuzzy_duplicate(self, text, guild_id):
         text_words = set(text.lower().split())
@@ -264,8 +210,7 @@ class Chat(commands.Cog):
             if random.random() > 0.16:
                 continue
             settings = await self.settings_manager.get_settings(guild.id)
-            if (not settings.get("proactive_enabled", False) or not self._uses_llm(settings)
-                    or not settings.get("response_enabled")):
+            if not settings.get("proactive_enabled", False) or not settings.get("response_enabled"):
                 continue
             target_channel = None
             allowed = settings.get("allowed_channels", [])
@@ -317,8 +262,6 @@ class Chat(commands.Cog):
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             settings = await self.settings_manager.get_settings(guild.id)
-            if settings.get("brain_mode") != "llm":
-                continue
             target_channel = None
             allowed = settings.get("allowed_channels", [])
             if allowed:
@@ -350,53 +293,6 @@ class Chat(commands.Cog):
             summary = await generate_llm_response(prompt, chat_history)
             if summary:
                 await self.db.save_consolidated_memory(guild.id, {"summary": summary, "timestamp": time.time()})
-
-    async def get_chain(self, guild_id, order):
-        if guild_id not in self.chains:
-            self.chains[guild_id] = MarkovChain(order=order)
-            raw_chain = await self.db.get_markov(guild_id)
-            if raw_chain:
-                self.chains[guild_id].from_db_dict(raw_chain)
-        return self.chains[guild_id]
-
-    def _generate_unique_markov(self, chain, trigger_text, guild_id, min_words, max_words):
-        recent_bot_msgs = self.bot_recent_messages.get(guild_id, [])
-        response = None
-        for _ in range(8):
-            generated = chain.generate(min_words=min_words, max_words=max_words, seed=None)
-            if not generated:
-                continue
-            gen_clean = generated.lower().strip()
-            if self._echoes_trigger(generated, trigger_text):
-                continue
-            if gen_clean in recent_bot_msgs:
-                continue
-            response = generated
-            break
-        if response:
-            if guild_id not in self.bot_recent_messages:
-                self.bot_recent_messages[guild_id] = []
-            self.bot_recent_messages[guild_id].append(response.lower().strip())
-            self.bot_recent_messages[guild_id] = self.bot_recent_messages[guild_id][-20:]
-        return response
-
-    @commands.Cog.listener()
-    async def on_guild_join(self, guild):
-        stats = await self.db.get_stats(guild.id)
-        if stats["messages_learned"] == 0:
-            try:
-                with open("training_data.txt", "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                settings = await self.settings_manager.get_settings(guild.id)
-                chain = await self.get_chain(guild.id, settings["markov_order"])
-                for line in lines:
-                    clean_line = line.strip()
-                    if clean_line:
-                        chain.learn(clean_line)
-                await self.db.save_full_chain(guild.id, chain.to_db_dict())
-                await self.db.increment_stat(guild.id, "messages_learned", len(lines))
-            except Exception as e:
-                print(f"Training data load failed for guild {guild.id}: {e}")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -441,17 +337,6 @@ class Chat(commands.Cog):
         is_bot = message.author.bot
         if is_bot and not settings["learn_from_bots"]:
             return
-
-        if (settings["learning_enabled"] and self._markov_enabled(settings)
-                and not message.content.startswith("/")):
-            chain = await self.get_chain(guild_id, settings["markov_order"])
-            chain.learn(message.content)
-            words = message.content.lower().split()
-            if len(words) >= chain.order:
-                stats = await self.db.get_stats(guild_id)
-                await self.db.increment_stat(guild_id, "messages_learned")
-                if stats["messages_learned"] % 20 == 0:
-                    await self.db.save_full_chain(guild_id, chain.to_db_dict())
 
         if is_bot or message.content.startswith("/"):
             return
@@ -573,7 +458,7 @@ class Chat(commands.Cog):
                 final_content = None
                 reference = message if use_reply else None
 
-                if self._uses_llm(settings) and not use_gif:
+                if not use_gif:
                     chat_history = []
                     prev_msg_time = None
                     async for msg in message.channel.history(limit=100):
@@ -624,13 +509,16 @@ class Chat(commands.Cog):
                         user_memories = await self.db.get_memories(guild_id, message.author.id)
                         consolidated = await self.db.get_consolidated_memory(guild_id)
 
-                    dynamic_prompt = settings.get("personality_prompt", "") or BASE_SECRET_PROMPT
+                    dynamic_prompt = self._personality_prompt(settings)
                     dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
                     if consolidated and consolidated.get("summary"):
                         dynamic_prompt += f"\n\nCONTEXT OF SERVER CULTURE:\n{consolidated['summary']}\nUse this subtly."
                     if user_memories:
                         memory_str = "\n".join([f"- {m}" for m in user_memories])
-                        dynamic_prompt += f"\n\nPermanent memories about {message.author.display_name}:\n{memory_str}\nBe a smart-ass about these."
+                        dynamic_prompt += (
+                            f"\n\nPermanent memories about {message.author.display_name}:\n{memory_str}\n"
+                            "Reference these casually when relevant."
+                        )
 
                     chat_history.insert(0, {"role": "system", "content": dynamic_prompt,
                                         "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
@@ -655,45 +543,17 @@ class Chat(commands.Cog):
                         print(f"[{guild_id}] LLM returned None.")
 
                     if not final_content:
-                        if self._markov_enabled(settings):
-                            chain = await self.get_chain(guild_id, settings["markov_order"])
-                            response = self._generate_unique_markov(
-                                chain, message.content, guild_id,
-                                settings["min_response_words"], settings["max_response_words"])
-                            if response:
-                                base_text = f"{settings['personality_prefix']} {response}".strip()
-                                base_text = sanitize_message(base_text)
-                                final_content = (
-                                    f"{message.author.mention} {base_text}" if use_mention else base_text
-                                )
-                        if not final_content:
-                            final_content = random.choice(FALLBACK_QUOTES)
+                        final_content = random.choice(FALLBACK_QUOTES)
 
-                else:
-                    if use_gif:
-                        search_words = [w for w in message.content.lower().split() if len(w) > 3]
-                        search_query = random.choice(search_words) if search_words else "meme"
-                        gif_url = await search_gif(search_query)
-                        if gif_url:
-                            final_content = f"{message.author.mention} " if use_mention else ""
-                            final_content += gif_url
-                        else:
-                            use_gif = False
-                    if not use_gif:
-                        if self._markov_enabled(settings):
-                            chain = await self.get_chain(guild_id, settings["markov_order"])
-                            response = self._generate_unique_markov(
-                                chain, message.content, guild_id,
-                                settings["min_response_words"], settings["max_response_words"])
-                            if response:
-                                prefix = settings["personality_prefix"]
-                                base_text = f"{prefix} {response}".strip()
-                                base_text = sanitize_message(base_text)
-                                final_content = (
-                                    f"{message.author.mention} {base_text}" if use_mention else base_text
-                                )
-                        if not final_content:
-                            final_content = random.choice(FALLBACK_QUOTES)
+                elif use_gif:
+                    search_words = [w for w in message.content.lower().split() if len(w) > 3]
+                    search_query = random.choice(search_words) if search_words else "meme"
+                    gif_url = await search_gif(search_query)
+                    if gif_url:
+                        final_content = f"{message.author.mention} " if use_mention else ""
+                        final_content += gif_url
+                    else:
+                        final_content = random.choice(FALLBACK_QUOTES)
 
                 if final_content:
                     if not use_gif:

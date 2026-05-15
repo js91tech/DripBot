@@ -8,7 +8,6 @@ from config.default_settings import (
     build_personality_settings_update,
     normalize_personality_preset,
 )
-from engine.markov import MarkovChain
 from utils import sanitize_message
 from llm import generate_llm_response, parse_settings_command
 import json
@@ -16,6 +15,7 @@ import json
 
 def _personality_choices():
     labels = {
+        "hannah": "Hannah (Default — Chaotic Discord Energy)",
         "ultron": "Ultron (Sarcastic Smart-Ass)",
         "deadpool": "Deadpool (Chaotic 4th-Wall)",
         "jarvis": "J.A.R.V.I.S. (British Butler)",
@@ -25,7 +25,6 @@ def _personality_choices():
         "bender": "Bender (Rude Robot)",
         "the_brain": "The Brain (Megalomaniac)",
         "conquest": "Conquest (Viltrumite Warlord)",
-        "hannah": "Hannah (Chaotic Discord Energy)",
     }
     return [
         app_commands.Choice(name=labels.get(preset_id, preset["name"]), value=preset_id)
@@ -72,7 +71,7 @@ class SettingsCog(commands.Cog):
                 "- `switch model to meta-llama/llama-3-70b-instruct`\n"
                 "- `turn off responses`\n"
                 "- `set cooldown to 15`\n"
-                "- `switch to markov mode`",
+                "- `switch personality to hannah`",
                 ephemeral=True,
             )
             return
@@ -298,14 +297,12 @@ class SettingsCog(commands.Cog):
     @app_commands.describe(setting="Choose the setting to toggle")
     @app_commands.choices(setting=[
         app_commands.Choice(name="Response Enabled", value="response_enabled"),
-        app_commands.Choice(name="Learning Enabled", value="learning_enabled"),
         app_commands.Choice(name="Learn From Bots", value="learn_from_bots"),
         app_commands.Choice(name="Trigger on Mention", value="trigger_on_mention"),
         app_commands.Choice(name="Trigger on Reply", value="trigger_on_reply"),
         app_commands.Choice(name="Vision (Z.ai)", value="vision_enabled"),
         app_commands.Choice(name="Web Search (Z.ai)", value="web_search_enabled"),
         app_commands.Choice(name="Z.ai Image Gen", value="zai_image_gen_enabled"),
-        app_commands.Choice(name="Markov Chains", value="markov_enabled"),
     ])
     async def toggle_setting(self, interaction: discord.Interaction, setting: app_commands.Choice[str]):
         settings = await self.settings_manager.get_settings(interaction.guild.id)
@@ -335,16 +332,6 @@ class SettingsCog(commands.Cog):
             f"Chattiness set to **{level.name}**. Response chance is now {chance * 100}%",
             ephemeral=True,
         )
-
-    @group.command(name="mode", description="Switch between Markov and LLM")
-    @app_commands.describe(brain="Select the brain mode")
-    @app_commands.choices(brain=[
-        app_commands.Choice(name="Markov (Free, Silly, Random)", value="markov"),
-        app_commands.Choice(name="LLM (Costs Cents, Human-like, Coherent)", value="llm"),
-    ])
-    async def mode(self, interaction: discord.Interaction, brain: app_commands.Choice[str]):
-        await self.settings_manager.set_setting(interaction.guild.id, "brain_mode", brain.value)
-        await interaction.response.send_message(f"Brain mode set to **{brain.name}**.", ephemeral=True)
 
     @group.command(name="remember", description="Make the bot permanently remember a fact about a user")
     @app_commands.describe(user="The user this fact is about", fact="The fact to remember")
@@ -405,34 +392,34 @@ class SettingsCog(commands.Cog):
             await interaction.response.send_message("I only mimic humans!", ephemeral=True)
             return
         await interaction.response.defer(thinking=True)
-        try:
-            temp_chain = MarkovChain(order=2)
-            messages_found = 0
-            exact_messages = set()
-            async for msg in interaction.channel.history(limit=5000):
-                if msg.author.id == user.id and not msg.content.startswith("/") and msg.content.strip():
-                    temp_chain.learn(msg.content)
-                    exact_messages.add(msg.content.lower().strip())
-                    messages_found += 1
-                    if messages_found >= 500:
-                        break
-            if messages_found < 5:
-                await interaction.followup.send(
-                    f"{user.display_name} hasn't talked enough here for me to mimic them!",
-                    ephemeral=True,
-                )
-                return
-            response = None
-            for _ in range(5):
-                generated = temp_chain.generate(min_words=4, max_words=40)
-                if generated and generated.lower().strip() not in exact_messages:
-                    response = generated
+        user_msgs = []
+        async for msg in interaction.channel.history(limit=500):
+            if msg.author.id == user.id and not msg.content.startswith("/") and msg.content.strip():
+                user_msgs.insert(0, msg.content)
+                if len(user_msgs) >= 40:
                     break
+        if len(user_msgs) < 5:
+            await interaction.followup.send(
+                f"{user.display_name} hasn't talked enough here for me to mimic them!",
+                ephemeral=True,
+            )
+            return
+        settings = await self.settings_manager.get_settings(interaction.guild.id)
+        mimic_prompt = (
+            f"Write one short Discord message that sounds exactly like {user.display_name} "
+            f"based on how they type below. Match slang, rhythm, and tone. One line only. "
+            f"No display names, no @ symbols, no quotes around the message."
+        )
+        chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
+        chat_history.insert(0, {"role": "system", "content": mimic_prompt,
+                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+        try:
+            response = await generate_llm_response(mimic_prompt, chat_history)
             if response:
                 await interaction.followup.send(f"**{user.display_name}:** {sanitize_message(response)}")
             else:
                 await interaction.followup.send(
-                    f"I couldn't figure out how to mix up {user.display_name}'s words creatively!",
+                    f"I couldn't figure out how to mimic {user.display_name} right now.",
                     ephemeral=True,
                 )
         except Exception as e:
@@ -468,47 +455,14 @@ class SettingsCog(commands.Cog):
     async def stats(self, interaction: discord.Interaction):
         stats = await self.db.get_stats(interaction.guild.id)
         embed = discord.Embed(title="Learning Stats", color=discord.Color.green())
-        embed.add_field(name="Messages Learned", value=str(stats["messages_learned"]), inline=True)
         embed.add_field(name="Messages Sent", value=str(stats["messages_sent"]), inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @group.command(name="resetdata", description="Delete ALL learned data for this server")
     async def reset_data(self, interaction: discord.Interaction):
         await self.db.delete_guild_data(interaction.guild.id)
-        if interaction.guild.id in self.bot.get_cog("Chat").chains:
-            del self.bot.get_cog("Chat").chains[interaction.guild.id]
         await self.settings_manager.reset_all(interaction.guild.id)
         await interaction.response.send_message("All learned data and settings have been wiped.", ephemeral=True)
-
-    @group.command(name="loadbrain", description="Manually load the starter brain text file")
-    async def load_brain(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        guild_id = interaction.guild.id
-        try:
-            with open("training_data.txt", "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            await interaction.followup.send("No `training_data.txt` file found!", ephemeral=True)
-            return
-        settings = await self.settings_manager.get_settings(guild_id)
-        chat_cog = self.bot.get_cog("Chat")
-        if not chat_cog:
-            await interaction.followup.send("Chat cog not loaded.", ephemeral=True)
-            return
-        chain = await chat_cog.get_chain(guild_id, settings["markov_order"])
-        learned_count = 0
-        for line in lines:
-            clean_line = line.strip()
-            if clean_line:
-                chain.learn(clean_line)
-                learned_count += 1
-        await self.db.save_full_chain(guild_id, chain.to_db_dict())
-        await self.db.increment_stat(guild_id, "messages_learned", learned_count)
-        await interaction.followup.send(
-            f"Successfully loaded starter brain! Learned {learned_count} lines.",
-            ephemeral=True,
-        )
-
 
 async def setup(bot):
     await bot.add_cog(SettingsCog(bot, bot.db, bot.settings_manager))

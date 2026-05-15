@@ -65,6 +65,12 @@ class SettingsManager:
             settings.update(update_data)
             return True
 
+        if not settings.get("personality_prompt"):
+            update_data = build_personality_settings_update("hannah")
+            if update_data:
+                settings.update(update_data)
+                return True
+
         return False
 
     async def save_settings(self, guild_id, settings_dict=None):

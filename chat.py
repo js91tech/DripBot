@@ -4,7 +4,7 @@ Personality preset commands (!personality, !presets).
 Loaded as a cog via bot.load_extension("chat").
 
 NOTE: The main message handler (on_message with triggers, LLM, vision, web search,
-Markov, memory, proactive, puppet mode) is in cogs/chat.py.
+LLM chat, memory, proactive, puppet mode) is in cogs/chat.py.
 This cog handles only the personality management prefix commands.
 """
 
