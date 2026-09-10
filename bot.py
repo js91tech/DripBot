@@ -191,6 +191,20 @@ async def on_message(message):
 #  Prefix Commands
 # ═══════════════════════════════════════════════════════════════
 
+@bot.event
+async def on_command_error(ctx, error):
+    # Surface owner-facing failures instead of silent no-ops for unknown commands.
+    if isinstance(error, commands.CommandNotFound):
+        # Ignore unknown commands in guilds; in DMs hint if it looks like puppet help.
+        if ctx.guild is None and ctx.message.content.lower().startswith("!server"):
+            await ctx.send("Unknown command. Try `!servers` (after the latest deploy).")
+        return
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing argument: `{error.param.name}`")
+        return
+    logger.error(f"Command error in {ctx.command}: {error}", exc_info=error)
+
+
 @bot.command(name="ping")
 async def ping(ctx):
     latency = round(bot.latency * 1000)
