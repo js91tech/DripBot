@@ -421,18 +421,25 @@ class Chat(commands.Cog):
                 # Owner can retarget puppet with:
                 #   !target <channel_id>
                 #   !target <server_id>
-                if lower.startswith("!target ") or lower.startswith("! "):
+                #   !<server_id>
+                is_target_cmd = lower.startswith("!target ")
+                is_bang_id = False
+                bang_id = None
+                if not is_target_cmd and raw.startswith("!"):
+                    maybe = raw[1:].strip()
+                    if maybe.isdigit():
+                        is_bang_id = True
+                        bang_id = int(maybe)
+
+                if is_target_cmd or is_bang_id:
                     try:
-                        if lower.startswith("!target "):
-                            new_id = int(raw.split(None, 1)[1].strip())
-                        else:
-                            new_id = int(raw[1:].strip())
+                        new_id = bang_id if is_bang_id else int(raw.split(None, 1)[1].strip())
                     except (IndexError, ValueError):
                         await message.author.send(
                             "Usage:\n"
                             "`!target <channel_id>` — exact channel\n"
                             "`!target <server_id>` — auto-pick a sendable channel in that server\n"
-                            "`! <server_id>` — same as server target\n"
+                            "`!<server_id>` — same as server target\n"
                             "`!servers` — list servers + channel ids"
                         )
                         return
