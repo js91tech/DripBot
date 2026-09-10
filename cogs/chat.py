@@ -374,6 +374,131 @@ class Chat(commands.Cog):
             )
         os.environ["OWNER_TARGET_CHANNEL_ID"] = str(channel.id)
 
+    def _owner_user_id(self):
+        try:
+            return int(os.getenv("OWNER_USER_ID", "0") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _is_owner(self, user_id):
+        owner_id = self._owner_user_id()
+        return owner_id != 0 and int(user_id) == owner_id
+
+    def _format_servers_list(self):
+        lines = []
+        for guild in self.bot.guilds:
+            channel = self._pick_sendable_channel(guild)
+            if channel:
+                lines.append(
+                    f"- **{guild.name}** `{guild.id}` → #{channel.name} `{channel.id}`"
+                )
+            else:
+                lines.append(
+                    f"- **{guild.name}** `{guild.id}` → no sendable channel"
+                )
+        body = "\n".join(lines) if lines else "(none)"
+        return (
+            "Servers I'm in:\n"
+            f"{body}\n\n"
+            "Set target with `!target <server_id>` or `!target <channel_id>` "
+            "(or DM `!<server_id>`)."
+        )
+
+    async def _apply_puppet_target_id(self, destination, new_id):
+        """Resolve channel/server id and set puppet target. Returns True on success."""
+        target = self.bot.get_channel(new_id)
+        if target is None:
+            guild = self.bot.get_guild(new_id)
+            if guild is None:
+                await destination.send(
+                    f"`{new_id}` is not a channel or server I can see. "
+                    "Use `!servers` to list ids, or make sure the bot is in that server."
+                )
+                return False
+            target = self._pick_sendable_channel(guild)
+            if target is None:
+                await destination.send(
+                    f"I'm in **{guild.name}** but can't send in any text channel there. "
+                    "Give the bot **View Channel** + **Send Messages**, then try again."
+                )
+                return False
+            await self._set_puppet_target_channel(target)
+            await destination.send(
+                f"Puppet target set to #{target.name} (`{target.id}`) in **{guild.name}** "
+                f"(auto-picked from server `{guild.id}`)."
+            )
+            return True
+
+        await self._set_puppet_target_channel(target)
+        guild_name = target.guild.name if target.guild else "unknown"
+        await destination.send(
+            f"Puppet target set to #{target.name} (`{target.id}`) in **{guild_name}**."
+        )
+        return True
+
+    @commands.command(name="servers", aliases=["guilds"])
+    async def servers_command(self, ctx):
+        """List servers the bot is in (owner only). Works in DMs and servers."""
+        print(f"[PUPPET] !servers from {ctx.author.id} in {ctx.channel.id}")
+        if not self._is_owner(ctx.author.id):
+            owner_id = self._owner_user_id()
+            if owner_id == 0:
+                await ctx.send("`OWNER_USER_ID` is not set on the bot host, so owner commands are disabled.")
+            else:
+                await ctx.send("Only the configured bot owner can use `!servers`.")
+            return
+        try:
+            text = self._format_servers_list()
+            # Discord hard limit 2000 chars
+            if len(text) <= 1900:
+                await ctx.send(text)
+            else:
+                chunks = []
+                current = "Servers I'm in:\n"
+                for line in text.splitlines()[1:]:
+                    if len(current) + len(line) + 1 > 1900:
+                        chunks.append(current)
+                        current = line + "\n"
+                    else:
+                        current += line + "\n"
+                if current.strip():
+                    chunks.append(current)
+                for chunk in chunks:
+                    await ctx.send(chunk)
+        except Exception as e:
+            print(f"[PUPPET] !servers failed: {e}")
+            await ctx.send(f"Couldn't list servers: `{e}`")
+
+    @commands.command(name="target")
+    async def target_command(self, ctx, target_id: str = None):
+        """Set puppet target to a channel id or server id (owner only)."""
+        print(f"[PUPPET] !target {target_id!r} from {ctx.author.id}")
+        if not self._is_owner(ctx.author.id):
+            owner_id = self._owner_user_id()
+            if owner_id == 0:
+                await ctx.send("`OWNER_USER_ID` is not set on the bot host, so owner commands are disabled.")
+            else:
+                await ctx.send("Only the configured bot owner can use `!target`.")
+            return
+        if not target_id:
+            await ctx.send(
+                "Usage:\n"
+                "`!target <channel_id>` — exact channel\n"
+                "`!target <server_id>` — auto-pick a sendable channel in that server\n"
+                "`!servers` — list servers + ids"
+            )
+            return
+        try:
+            new_id = int(target_id.strip())
+        except ValueError:
+            await ctx.send("Target id must be a numeric channel or server id. Try `!servers`.")
+            return
+        try:
+            await self._apply_puppet_target_id(ctx, new_id)
+        except Exception as e:
+            print(f"[PUPPET] !target failed: {e}")
+            await ctx.send(f"Couldn't set target: `{e}`")
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         sendable = [
@@ -394,93 +519,35 @@ class Chat(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if isinstance(message.channel, discord.DMChannel):
-            owner_id = int(os.getenv("OWNER_USER_ID", "0"))
-            if owner_id != 0 and message.author.id == owner_id and message.content:
-                raw = message.content.strip()
-                lower = raw.lower()
+            raw = (message.content or "").strip()
+            owner_id = self._owner_user_id()
 
-                # List servers the bot is in
-                if lower in {"!servers", "!guilds"}:
-                    lines = []
-                    for guild in self.bot.guilds:
-                        channel = self._pick_sendable_channel(guild)
-                        if channel:
-                            lines.append(
-                                f"- **{guild.name}** `{guild.id}` → {channel.mention} `{channel.id}`"
-                            )
-                        else:
-                            lines.append(
-                                f"- **{guild.name}** `{guild.id}` → no sendable channel"
-                            )
-                    await message.author.send(
-                        "Servers I'm in:\n" + ("\n".join(lines) if lines else "(none)")
-                        + "\n\nSet target with `!target <server_id>` or `!target <channel_id>`."
-                    )
+            # Let prefix commands (!servers, !target, !ping, ...) be handled by process_commands.
+            if raw.startswith("!"):
+                cmd_token = raw[1:].split(None, 1)[0].lower() if raw[1:].strip() else ""
+                if cmd_token and self.bot.get_command(cmd_token):
                     return
 
-                # Owner can retarget puppet with:
-                #   !target <channel_id>
-                #   !target <server_id>
-                #   !<server_id>
-                is_target_cmd = lower.startswith("!target ")
-                is_bang_id = False
-                bang_id = None
-                if not is_target_cmd and raw.startswith("!"):
+            if owner_id != 0 and message.author.id == owner_id and raw:
+                # Shorthand: !<server_or_channel_id>
+                if raw.startswith("!"):
                     maybe = raw[1:].strip()
                     if maybe.isdigit():
-                        is_bang_id = True
-                        bang_id = int(maybe)
-
-                if is_target_cmd or is_bang_id:
-                    try:
-                        new_id = bang_id if is_bang_id else int(raw.split(None, 1)[1].strip())
-                    except (IndexError, ValueError):
-                        await message.author.send(
-                            "Usage:\n"
-                            "`!target <channel_id>` — exact channel\n"
-                            "`!target <server_id>` — auto-pick a sendable channel in that server\n"
-                            "`!<server_id>` — same as server target\n"
-                            "`!servers` — list servers + channel ids"
-                        )
+                        print(f"[PUPPET] !<id> {maybe} from owner")
+                        try:
+                            await self._apply_puppet_target_id(message.channel, int(maybe))
+                        except Exception as e:
+                            print(f"[PUPPET] !<id> failed: {e}")
+                            await message.channel.send(f"Couldn't set target: `{e}`")
                         return
-
-                    # Prefer channel id match; otherwise treat as server/guild id
-                    target = self.bot.get_channel(new_id)
-                    if target is None:
-                        guild = self.bot.get_guild(new_id)
-                        if guild is None:
-                            await message.author.send(
-                                f"`{new_id}` is not a channel or server I can see. "
-                                "Use `!servers` to list ids, or make sure the bot is in that server."
-                            )
-                            return
-                        target = self._pick_sendable_channel(guild)
-                        if target is None:
-                            await message.author.send(
-                                f"I'm in **{guild.name}** but can't send in any text channel there. "
-                                "Give the bot **View Channel** + **Send Messages**, then try again."
-                            )
-                            return
-                        await self._set_puppet_target_channel(target)
-                        await message.author.send(
-                            f"Puppet target set to {target.mention} in **{guild.name}** "
-                            f"(auto-picked from server `{guild.id}`)."
-                        )
-                        return
-
-                    await self._set_puppet_target_channel(target)
-                    await message.author.send(
-                        f"Puppet target set to {target.mention} in **{target.guild.name}**."
-                    )
-                    return
 
                 target_channel = await self._resolve_puppet_target()
                 if target_channel is None:
                     env_id = os.getenv("OWNER_TARGET_CHANNEL_ID", "0")
-                    await message.author.send(
+                    await message.channel.send(
                         "No puppet target channel found. "
                         f"Set `OWNER_TARGET_CHANNEL_ID` (current: `{env_id}`), "
-                        "or DM me `!target <server_id>` / `!servers`."
+                        "or use `!servers` then `!target <server_id>`."
                     )
                     return
 
@@ -491,35 +558,39 @@ class Chat(commands.Cog):
                     )
                     puppet_enabled = puppet_settings.get("puppet_enabled", True)
                 if not puppet_enabled:
-                    await message.author.send("Puppet mode is disabled for that server.")
+                    await message.channel.send("Puppet mode is disabled for that server.")
                     return
 
                 me = target_channel.guild.me if getattr(target_channel, "guild", None) else None
                 if me is not None:
                     perms = target_channel.permissions_for(me)
                     if not perms.view_channel or not perms.send_messages:
-                        guild_name = target_channel.guild.name
-                        channel_label = getattr(target_channel, "mention", f"#{target_channel.name}")
-                        missing = []
-                        if not perms.view_channel:
-                            missing.append("View Channel")
-                        if not perms.send_messages:
-                            missing.append("Send Messages")
-                        await message.author.send(
-                            f"Missing permissions in {channel_label} ({guild_name}). "
-                            f"Need: {', '.join(missing)}. "
-                            "Give the bot's role access to that channel, or DM me "
-                            "`!target <server_id>` / `!target <channel_id>`."
+                        await message.channel.send(
+                            self._format_send_permission_error(
+                                target_channel,
+                                type("E", (), {"code": 50013})(),
+                            )
                         )
                         return
 
                 try:
                     await target_channel.send(message.content)
-                    await message.author.send(
-                        f"Spoke in {target_channel.mention} ({target_channel.guild.name})."
+                    await message.channel.send(
+                        f"Spoke in #{target_channel.name} ({target_channel.guild.name})."
                     )
                 except discord.errors.HTTPException as e:
-                    await message.author.send(self._format_send_permission_error(target_channel, e))
+                    await message.channel.send(self._format_send_permission_error(target_channel, e))
+            elif raw.lower() in {"!servers", "!guilds", "!target"} or raw.lower().startswith("!target "):
+                # Owner gate failed — explain instead of silent ignore
+                if owner_id == 0:
+                    await message.channel.send(
+                        "`OWNER_USER_ID` is not set on the bot host, so `!servers` / `!target` are disabled."
+                    )
+                else:
+                    await message.channel.send(
+                        "Only the configured bot owner can use puppet commands "
+                        f"(your id `{message.author.id}`)."
+                    )
             return
 
         if message.guild is None or message.author == self.bot.user:
