@@ -294,30 +294,144 @@ class Chat(commands.Cog):
             if summary:
                 await self.db.save_consolidated_memory(guild.id, {"summary": summary, "timestamp": time.time()})
 
+    def _format_send_permission_error(self, channel, error):
+        """Turn Discord Missing Permissions into an actionable owner-facing message."""
+        code = getattr(error, "code", None)
+        guild_name = channel.guild.name if getattr(channel, "guild", None) else "unknown server"
+        channel_label = getattr(channel, "mention", None) or f"#{getattr(channel, 'name', channel.id)}"
+        if code == 50013:
+            missing = []
+            me = channel.guild.me if getattr(channel, "guild", None) else None
+            if me is not None:
+                perms = channel.permissions_for(me)
+                if not perms.view_channel:
+                    missing.append("View Channel")
+                if not perms.send_messages:
+                    missing.append("Send Messages")
+                if not perms.embed_links:
+                    missing.append("Embed Links (optional)")
+            missing_txt = ", ".join(missing) if missing else "Send Messages / View Channel"
+            return (
+                f"Missing permissions in {channel_label} ({guild_name}). "
+                f"Need: {missing_txt}. "
+                "Give the bot's role access to that channel, or update "
+                "`OWNER_TARGET_CHANNEL_ID` / `puppet_target_channel` to a channel it can speak in."
+            )
+        return f"Failed to send in {channel_label} ({guild_name}): {error}"
+
+    async def _resolve_puppet_target(self, preferred_channel_id=0):
+        """Resolve puppet target from settings, env, or preferred channel id."""
+        env_channel_id = int(os.getenv("OWNER_TARGET_CHANNEL_ID", "0") or 0)
+        candidates = []
+        if preferred_channel_id:
+            candidates.append(int(preferred_channel_id))
+        if env_channel_id:
+            candidates.append(env_channel_id)
+        for guild in self.bot.guilds:
+            try:
+                settings = await self.settings_manager.get_settings(guild.id)
+            except Exception:
+                continue
+            setting_id = int(settings.get("puppet_target_channel") or 0)
+            if setting_id:
+                candidates.append(setting_id)
+
+        seen = set()
+        for channel_id in candidates:
+            if not channel_id or channel_id in seen:
+                continue
+            seen.add(channel_id)
+            channel = self.bot.get_channel(channel_id)
+            if channel is not None:
+                return channel
+        return None
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        sendable = [
+            c for c in guild.text_channels
+            if c.permissions_for(guild.me).send_messages
+        ]
+        if not sendable:
+            print(
+                f"[PERMISSIONS] Joined {guild.name} ({guild.id}) but cannot send "
+                "in any text channel. Grant View Channel + Send Messages to the bot role."
+            )
+        else:
+            print(
+                f"[PERMISSIONS] Joined {guild.name} ({guild.id}); "
+                f"can send in {len(sendable)} channel(s)."
+            )
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if isinstance(message.channel, discord.DMChannel):
             owner_id = int(os.getenv("OWNER_USER_ID", "0"))
             if owner_id != 0 and message.author.id == owner_id and message.content:
-                target_channel_id = int(os.getenv("OWNER_TARGET_CHANNEL_ID", "0"))
-                if target_channel_id != 0:
-                    target_channel = self.bot.get_channel(target_channel_id)
-                    puppet_enabled = True
-                    if target_channel and getattr(target_channel, "guild", None):
-                        puppet_settings = await self.settings_manager.get_settings(
-                            target_channel.guild.id
-                        )
-                        puppet_enabled = puppet_settings.get("puppet_enabled", True)
-                    if not puppet_enabled:
+                raw = message.content.strip()
+                # Owner can retarget puppet with: !target <channel_id>
+                if raw.lower().startswith("!target "):
+                    try:
+                        new_id = int(raw.split(None, 1)[1].strip())
+                    except (IndexError, ValueError):
+                        await message.author.send("Usage: `!target <channel_id>`")
                         return
-                    if target_channel:
-                        try:
-                            await target_channel.send(message.content)
-                            await message.author.send("Spoke in server.")
-                        except discord.errors.HTTPException as e:
-                            await message.author.send(f"Failed to send: {e}")
-                    else:
-                        await message.author.send("Target channel not found.")
+                    target = self.bot.get_channel(new_id)
+                    if target is None:
+                        await message.author.send(
+                            f"Channel `{new_id}` not found. Make sure the bot is in that server "
+                            "and can see the channel."
+                        )
+                        return
+                    if getattr(target, "guild", None):
+                        await self.settings_manager.set_setting(
+                            target.guild.id, "puppet_target_channel", new_id
+                        )
+                    os.environ["OWNER_TARGET_CHANNEL_ID"] = str(new_id)
+                    await message.author.send(
+                        f"Puppet target set to {target.mention} in **{target.guild.name}**."
+                    )
+                    return
+
+                target_channel = await self._resolve_puppet_target()
+                if target_channel is None:
+                    env_id = os.getenv("OWNER_TARGET_CHANNEL_ID", "0")
+                    await message.author.send(
+                        "No puppet target channel found. "
+                        f"Set `OWNER_TARGET_CHANNEL_ID` (current: `{env_id}`), "
+                        "or DM me `!target <channel_id>` for a channel in a server the bot has joined."
+                    )
+                    return
+
+                puppet_enabled = True
+                if getattr(target_channel, "guild", None):
+                    puppet_settings = await self.settings_manager.get_settings(
+                        target_channel.guild.id
+                    )
+                    puppet_enabled = puppet_settings.get("puppet_enabled", True)
+                if not puppet_enabled:
+                    await message.author.send("Puppet mode is disabled for that server.")
+                    return
+
+                me = target_channel.guild.me if getattr(target_channel, "guild", None) else None
+                if me is not None:
+                    perms = target_channel.permissions_for(me)
+                    if not perms.view_channel or not perms.send_messages:
+                        await message.author.send(
+                            self._format_send_permission_error(
+                                target_channel,
+                                discord.errors.Forbidden(None, "Missing Permissions"),
+                            )
+                        )
+                        return
+
+                try:
+                    await target_channel.send(message.content)
+                    await message.author.send(
+                        f"Spoke in {target_channel.mention} ({target_channel.guild.name})."
+                    )
+                except discord.errors.HTTPException as e:
+                    await message.author.send(self._format_send_permission_error(target_channel, e))
             return
 
         if message.guild is None or message.author == self.bot.user:
