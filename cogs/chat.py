@@ -9,7 +9,7 @@ import re
 from collections import deque
 from datetime import timedelta, datetime, timezone
 from config.default_settings import HANNAH_PROMPT
-from utils import sanitize_message, search_gif
+from utils import sanitize_message, search_gif, world_context_line
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 
 FALLBACK_QUOTES = [
@@ -244,6 +244,7 @@ class Chat(commands.Cog):
                 "You don't need to reply directly, but if a random thought "
                 "pops into your head, say it. If nothing, say NO_THOUGHT. "
                 + RESPONSE_STYLE_PROMPT
+                + "\n" + await world_context_line()
             )
             chat_history.insert(0, {"role": "system", "content": prompt,
                                 "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
@@ -713,6 +714,7 @@ class Chat(commands.Cog):
 
                     dynamic_prompt = self._personality_prompt(settings)
                     dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
+                    dynamic_prompt += f"\n{await world_context_line()}"
                     if consolidated and consolidated.get("summary"):
                         dynamic_prompt += f"\n\nCONTEXT OF SERVER CULTURE:\n{consolidated['summary']}\nUse this subtly."
                     if user_memories:
