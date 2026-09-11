@@ -185,3 +185,68 @@ def sanitize_message(text):
     if len(text) > 1950:
         text = text[:1950] + "..."
     return text
+
+
+_LOW_SIGNAL_MESSAGES = {
+    "ok", "okay", "k", "kk", "lol", "lmao", "lmfao", "haha", "hahaha",
+    "yes", "yeah", "yep", "nah", "no", "np", "ty", "thx", "thanks",
+    "gn", "gm", "night", "bye", "same", "true", "fr", "real", "bet",
+    "mood", "bruh", "damn", "omg", "ikr", "idk", "oh", "ah", "mhm",
+}
+
+
+
+def is_low_signal_message(text: str) -> bool:
+    """True for tiny reactions that usually should not start a new bot turn."""
+    if not text:
+        return True
+    cleaned = re.sub(r"<@!?\d+>", "", text)
+    cleaned = re.sub(r"https?://\S+", "", cleaned)
+    cleaned = re.sub(r"[^a-zA-Z0-9\s']", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+    if not cleaned:
+        return True
+    if len(cleaned) <= 2:
+        return True
+    return cleaned in _LOW_SIGNAL_MESSAGES
+
+
+def looks_like_fact_question(text: str) -> bool:
+    """True when the user seems to want an outside fact, not just chat."""
+    if not text or len(text.strip()) < 4:
+        return False
+    cleaned = re.sub(r"<@!?\d+>", "", text).strip()
+    lower = cleaned.lower()
+    conversational = re.search(
+        r"\b(what are you|what'?s up|how are you|what do you|why are you|where are you|who are you|how'?s it going)\b",
+        lower,
+    )
+    if conversational:
+        return False
+    factual_cues = re.search(
+        r"\b("
+        r"who won|who lost|what is|what was|what are(?! you)|what'?s(?! up)|"
+        r"when is|when was|where is|where was|"
+        r"how much|how many|how long|how old|"
+        r"score|news|latest|today|tonight|current|price of|define|meaning of|explain|look up|search|"
+        r"did .+ (win|lose|happen)"
+        r")\b",
+        lower,
+    )
+    if not factual_cues:
+        return False
+    # Prefer clear question-shaped asks.
+    if cleaned.endswith("?") or factual_cues:
+        return len(cleaned.split()) >= 3
+    return False
+
+
+def message_mentions_image_context(text: str) -> bool:
+    """True when the text is actually about an attached/linked image."""
+    if not text:
+        return False
+    return bool(re.search(
+        r"\b(this|that|img|image|pic|picture|photo|screenshot|meme|look(?: at)? this)\b",
+        text,
+        re.I,
+    ))

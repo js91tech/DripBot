@@ -295,27 +295,39 @@ _llm_handler = LLMHandler()
 #  (cogs/chat.py and cogs/settings_cog.py import these by name)
 # ═══════════════════════════════════════════════════════════════
 
-async def generate_llm_response(system_prompt: str, messages: list) -> Optional[str]:
+async def generate_llm_response(
+    system_prompt: str,
+    messages: list,
+    auto_router: bool = False,
+    allowed_models: list = None,
+    max_tokens: int = 120,
+    temperature: float = 0.8,
+) -> Optional[str]:
     """
     Wrapper for cogs. Takes system_prompt + messages list.
-    Messages may contain a system message with embedded 'model' key
-    (the cog embeds the model there for routing).
+    Messages may contain a system message with embedded 'model' /
+    'auto_router' / 'allowed_models' keys (the cog embeds routing there).
+    Defaults to the configured model (not openrouter/auto) and a small
+    max_tokens budget so short Discord replies stay cheap.
     Returns the response content string, or None on failure.
     """
     model = None
     clean_messages = []
     actual_system_prompt = system_prompt
+    use_auto = bool(auto_router)
+    allowed = list(allowed_models) if allowed_models else None
 
     for msg in messages:
         if msg.get("role") == "system":
-            # Extract model if embedded by the cog
             if "model" in msg:
                 model = msg["model"]
-            # Use the system message content (may have memory context appended)
+            if "auto_router" in msg:
+                use_auto = bool(msg["auto_router"])
+            if msg.get("allowed_models"):
+                allowed = list(msg["allowed_models"])
             content = msg.get("content", "")
             if content:
                 actual_system_prompt = content
-            # Don't add to clean_messages — system_prompt param handles it
         else:
             clean_messages.append(msg)
 
@@ -326,6 +338,10 @@ async def generate_llm_response(system_prompt: str, messages: list) -> Optional[
         clean_messages,
         model=model,
         system_prompt=actual_system_prompt,
+        auto_router=use_auto,
+        allowed_models=allowed,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
     return result.get("content") if result else None
 

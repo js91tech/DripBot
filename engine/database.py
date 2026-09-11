@@ -127,9 +127,33 @@ class Database:
             ("DELETE FROM consolidated_memories WHERE guild_id = ?", (guild_id,))
         )
 
-    async def add_memory(self, guild_id, user_id, note):
+    async def add_memory(self, guild_id, user_id, note, limit: int = 12):
+        """Store a short per-user memory, skipping near-duplicates and capping count."""
+        note = (note or "").strip()
+        if not note:
+            return False
+        existing = await self.get_memories(guild_id, user_id)
+        note_l = note.lower()
+        for prev in existing:
+            prev_l = (prev or "").lower()
+            if note_l == prev_l or note_l in prev_l or prev_l in note_l:
+                return False
         sql = "INSERT INTO memories (guild_id, user_id, note) VALUES (?, ?, ?)"
-        await self.queue.put((sql, (guild_id, user_id, note)))
+        await self.queue.put((sql, (guild_id, user_id, note[:240])))
+        if len(existing) + 1 > limit:
+            # Drop oldest extras (table has no id/timestamp; delete then reinsert newest)
+            keep = (existing + [note[:240]])[-limit:]
+            await self.queue.put(
+                ("DELETE FROM memories WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+            )
+            for item in keep:
+                await self.queue.put(
+                    (
+                        "INSERT INTO memories (guild_id, user_id, note) VALUES (?, ?, ?)",
+                        (guild_id, user_id, item),
+                    )
+                )
+        return True
 
     async def get_memories(self, guild_id, user_id):
         cursor = await self.conn.execute(
