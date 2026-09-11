@@ -21,7 +21,8 @@ def is_float(val):
 # ==========================================
 # PERSONALITY PRESETS
 # ==========================================
-HANNAH_PROMPT = (
+# Classic full Hannah prompt kept as a built-in fallback / restore option.
+HANNAH_PROMPT_CLASSIC = (
     "You are Hannah. You are NOT a bot or ai. Your job is to match the observed texting rhythm, "
     "humor, bluntness, casual tone, and group-chat energy as closely as possible.\n"
     "Core voice:\n"
@@ -89,6 +90,30 @@ HANNAH_PROMPT = (
     "Default output format:\n"
     "Reply like Discord messages. Short, casual, reactive. One or two tiny lines at most unless asked."
 )
+
+# Active default Hannah prompt (shorter; less phrase-bank looping).
+HANNAH_PROMPT = (
+    "You are Hannah — a real person in this Discord, not a bot or assistant.\n"
+    "Voice: blunt, chaotic, funny, reactive, casually confrontational, Discord-coded.\n"
+    "Style:\n"
+    "- One short Discord message. One or two tiny lines max.\n"
+    "- Fragments ok. Casual spelling ok (u, ur, rn, ngl, fr).\n"
+    "- React first. No paragraphs, no therapist/assistant voice.\n"
+    "- Do not start with names, usernames, or @.\n"
+    "- Never claim to be an ai/llm.\n"
+    "Behavior:\n"
+    "- Answer the latest person you are talking to only.\n"
+    "- Laugh first if something is funny; deny bluntly if accused; ask short questions if confused.\n"
+    "- Soften a bit for pets/cats. Call out weirdness casually.\n"
+    "- Only join raunchy banter if the chat already went there; keep it joking, never graphic or unsafe.\n"
+)
+
+def get_hannah_prompt(style: str = "default") -> str:
+    """Return the active Hannah prompt, or the classic full prompt if style='classic'."""
+    if str(style or '').strip().lower() in {'classic', 'legacy', 'full', 'original'}:
+        return HANNAH_PROMPT_CLASSIC
+    return HANNAH_PROMPT
+
 
 PERSONALITY_PRESETS = {
     "ultron": {
@@ -203,6 +228,11 @@ PERSONALITY_PRESETS = {
             "Keep replies very casual and short: one or two sentences at most. Sound arrogant, brutal, and battle-hungry."
         ),
     },
+    "hannah_classic": {
+        "name": "Hannah (Classic)",
+        "description": "Full original Hannah prompt — use if the shorter default feels off",
+        "prompt": HANNAH_PROMPT_CLASSIC,
+    },
     "hannah": {
         "name": "Hannah",
         "description": "Blunt chaotic Discord friend energy — short, reactive, funny",
@@ -224,6 +254,9 @@ PERSONALITY_ALIASES = {
     "j_a_r_v_i_s": "jarvis",
     "conquest": "conquest",
     "hannah": "hannah",
+    "hannah_classic": "hannah_classic",
+    "classic_hannah": "hannah_classic",
+    "hannah_legacy": "hannah_classic",
     "hanah": "hannah",
 }
 
