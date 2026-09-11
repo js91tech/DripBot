@@ -9,7 +9,15 @@ import re
 from collections import deque
 from datetime import timedelta, datetime, timezone
 from config.default_settings import HANNAH_PROMPT
-from utils import sanitize_message, search_gif, world_context_line
+from utils import (
+    addressee_instruction,
+    engaged_with_other_user,
+    format_speaker_line,
+    sanitize_message,
+    search_gif,
+    strip_leading_address,
+    world_context_line,
+)
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 
 FALLBACK_QUOTES = [
@@ -123,6 +131,42 @@ class Chat(commands.Cog):
             text = shortened or text[:MAX_REPLY_CHARS].strip()
 
         return text
+
+    def _humanize_content(self, text, guild):
+        """Turn <@id> tokens into @DisplayName so the model knows who was tagged."""
+        if not text:
+            return ""
+
+        def _replace(match):
+            uid = int(match.group(1))
+            if self.bot.user and uid == self.bot.user.id:
+                return f"@{self.bot.user.display_name}"
+            member = guild.get_member(uid) if guild else None
+            if member:
+                return f"@{member.display_name}"
+            user = self.bot.get_user(uid)
+            if user:
+                return f"@{user.display_name}"
+            return "@someone"
+
+        return re.sub(r"<@!?(\d+)>", _replace, text)
+
+    def _reply_to_label(self, msg):
+        """Who a Discord message was replying to, if anyone."""
+        ref = getattr(msg, "reference", None)
+        resolved = getattr(ref, "resolved", None) if ref else None
+        author = getattr(resolved, "author", None)
+        if author is None:
+            return None
+        if self.bot.user and author.id == self.bot.user.id:
+            return "you"
+        return author.display_name
+
+    def _speaker_line(self, msg, guild):
+        content = self._humanize_content(msg.content or "", guild)
+        content = re.sub(r"<#\d+>", "", content).strip()
+        reply_to = self._reply_to_label(msg)
+        return format_speaker_line(msg.author.display_name, content, reply_to)
 
     def _is_image_request(self, message_content):
         clean = re.sub(r'<@!?\d+>', '', message_content).strip()
@@ -615,20 +659,25 @@ class Chat(commands.Cog):
         elif is_reply_to_bot and settings["trigger_on_reply"]:
             should_respond = True
 
-        # Check response_chance for non-direct triggers
-        if not should_respond:
-            window_seconds = settings.get("conversation_window_seconds", 120)
-            indirect_chance = settings.get("indirect_reply_chance", 0.40)
-            engagement = self.last_bot_engagement.get(channel_id)
-            if engagement and time.time() - engagement["time"] < window_seconds:
-                chance = indirect_chance
-                if message.author.id == engagement["user_id"]:
-                    chance = indirect_chance * 2.0
-                if random.random() < chance:
-                    should_respond = True
+        # Keep talking to the same person; don't jump to a bystander mid-thread.
+        window_seconds = settings.get("conversation_window_seconds", 120)
+        engagement = self.last_bot_engagement.get(channel_id)
+        talking_to_someone_else = engaged_with_other_user(
+            engagement, message.author.id, time.time(), window_seconds
+        )
 
-        # response_chance gates count-based triggers
         if not should_respond:
+            indirect_chance = settings.get("indirect_reply_chance", 0.40)
+            if (
+                engagement
+                and time.time() - engagement["time"] < window_seconds
+                and message.author.id == engagement["user_id"]
+                and random.random() < indirect_chance * 2.0
+            ):
+                should_respond = True
+
+        # Count-based interjections only when she isn't already in a 1:1 thread.
+        if not should_respond and not talking_to_someone_else:
             response_chance = settings.get("response_chance", 0.15)
             if random.random() < response_chance:
                 if self.channel_counters[channel_id] >= self.channel_message_goals[channel_id]:
@@ -655,11 +704,14 @@ class Chat(commands.Cog):
                 image_description = await self._get_image_context(message)
                 web_context = await self._enrich_with_search(message)
 
-                use_reply = is_mentioned or is_reply_to_bot or (random.random() < settings["random_reply_chance"])
-                use_mention = (random.random() < settings["random_mention_chance"])
+                use_mention = (
+                    is_mentioned
+                    or is_reply_to_bot
+                    or (random.random() < settings["random_mention_chance"])
+                )
                 use_gif = (random.random() < settings["gif_chance"])
                 final_content = None
-                reference = message if use_reply else None
+                speaker_names = {message.author.display_name}
 
                 if not use_gif:
                     chat_history = []
@@ -674,26 +726,26 @@ class Chat(commands.Cog):
                             if time_diff > timedelta(minutes=30):
                                 chat_history.insert(0, {"role": "system", "content": "--- A long time passes ---"})
                         prev_msg_time = msg.created_at
-                        clean_msg_content = re.sub(r'<@!?\d+>', '', msg.content).strip()
-                        clean_msg_content = re.sub(r'<#\d+>', '', clean_msg_content).strip()
                         if msg.author == self.bot.user:
                             role = "assistant"
-                            content_payload = clean_msg_content
+                            content_payload = self._humanize_content(msg.content or "", message.guild)
+                            if not content_payload and not msg.attachments:
+                                continue
                         else:
                             role = "user"
+                            speaker_names.add(msg.author.display_name)
                             content_payload = []
-                            text_part = f"{msg.author.display_name}: {clean_msg_content if clean_msg_content else 'sent an image'}"
+                            text_part = self._speaker_line(msg, message.guild)
                             content_payload.append({"type": "text", "text": text_part})
                             for att in msg.attachments:
                                 if att.content_type and "image" in att.content_type:
                                     content_payload.append({"type": "image_url", "image_url": {"url": att.url}})
-                            if not clean_msg_content and not msg.attachments:
+                            if not (msg.content or "").strip() and not msg.attachments:
                                 continue
                         chat_history.insert(0, {"role": role, "content": content_payload})
 
-                    clean_trigger_content = re.sub(r'<@!?\d+>', '', message.content).strip()
                     trigger_payload = []
-                    trigger_text = f"{message.author.display_name}: {clean_trigger_content if clean_trigger_content else 'sent an image'}"
+                    trigger_text = self._speaker_line(message, message.guild)
 
                     if image_description:
                         trigger_text += f" [The user sent an image: {image_description}]"
@@ -714,6 +766,7 @@ class Chat(commands.Cog):
 
                     dynamic_prompt = self._personality_prompt(settings)
                     dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
+                    dynamic_prompt += f"\n{addressee_instruction(message.author.display_name)}"
                     dynamic_prompt += f"\n{await world_context_line()}"
                     if consolidated and consolidated.get("summary"):
                         dynamic_prompt += f"\n\nCONTEXT OF SERVER CULTURE:\n{consolidated['summary']}\nUse this subtly."
@@ -729,14 +782,12 @@ class Chat(commands.Cog):
 
                     llm_response = await generate_llm_response(dynamic_prompt, chat_history)
                     if llm_response:
-                        llm_response = re.sub(r'^.{0,30}?:\s*', '', llm_response).strip()
-                        llm_response = re.sub(r'<@!?\d+>', '', llm_response).strip()
+                        llm_response = strip_leading_address(llm_response, speaker_names)
                         if self._is_fuzzy_duplicate(llm_response, guild_id):
                             print("[DEDUP] Blocked fuzzy duplicate response")
                             llm_response = None
                         if llm_response:
-                            base_text = sanitize_message(llm_response)
-                            final_content = f"{message.author.mention} {base_text}" if use_mention else base_text
+                            final_content = sanitize_message(llm_response)
                             if guild_id not in self.bot_recent_messages:
                                 self.bot_recent_messages[guild_id] = []
                             self.bot_recent_messages[guild_id].append(llm_response.lower().strip())
@@ -754,8 +805,7 @@ class Chat(commands.Cog):
                     search_query = random.choice(search_words) if search_words else "meme"
                     gif_url = await search_gif(search_query)
                     if gif_url:
-                        final_content = f"{message.author.mention} " if use_mention else ""
-                        final_content += gif_url
+                        final_content = gif_url
                     else:
                         final_content = random.choice(FALLBACK_QUOTES)
 
@@ -763,7 +813,11 @@ class Chat(commands.Cog):
                     if not use_gif:
                         final_content = self._trim_reply(final_content)
                     try:
-                        await message.channel.send(final_content, reference=reference)
+                        await message.channel.send(
+                            final_content,
+                            reference=message,
+                            mention_author=use_mention,
+                        )
                         self.channel_cooldowns[channel_id] = time.time()
                         await self.db.increment_stat(guild_id, "messages_sent")
                         self.last_bot_engagement[channel_id] = {"time": time.time(), "user_id": message.author.id}
