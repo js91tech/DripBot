@@ -127,6 +127,54 @@ async def search_gif(query):
     return None
 
 
+def engaged_with_other_user(engagement, author_id, now, window_seconds):
+    """True if the bot is mid-conversation with someone else in this channel."""
+    if not engagement or not author_id:
+        return False
+    try:
+        elapsed = now - float(engagement.get("time", 0))
+        other_id = int(engagement.get("user_id", 0))
+    except (TypeError, ValueError):
+        return False
+    return elapsed < window_seconds and other_id not in (0, int(author_id))
+
+
+def format_speaker_line(author_name, content, reply_to=None):
+    """One history line so the model can tell who spoke and who they replied to."""
+    body = content if content else "sent an image"
+    if reply_to:
+        return f"{author_name} (replying to {reply_to}): {body}"
+    return f"{author_name}: {body}"
+
+
+def addressee_instruction(display_name):
+    """Tiny prompt pin: answer this person, not someone else in the log."""
+    name = (display_name or "them").strip() or "them"
+    return (
+        f"You are talking to {name} only. Reply to their latest message, not someone else's. "
+        "Do not start with a name, username, or @."
+    )
+
+
+def strip_leading_address(text, names=None):
+    """Drop leftover 'Name:' / '@Name' prefixes so the Discord reply target stays correct."""
+    if not text:
+        return text
+    cleaned = text.strip()
+    cleaned = re.sub(r"^<@!?\d+>\s*", "", cleaned)
+    cleaned = re.sub(r"^@\S+[,:\s]+", "", cleaned)
+    for name in sorted({n for n in (names or []) if n and len(n) >= 2}, key=len, reverse=True):
+        cleaned = re.sub(
+            rf"^@?{re.escape(name)}\s*[:,\-–]\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    cleaned = re.sub(r"^.{0,30}?:\s*", "", cleaned).strip()
+    cleaned = re.sub(r"<@!?\d+>", "", cleaned).strip()
+    return cleaned
+
+
 def sanitize_message(text):
     """Cleans up bot messages to prevent Discord API errors."""
     # Remove @everyone and @here to prevent mass pings
