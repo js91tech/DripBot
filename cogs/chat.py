@@ -12,7 +12,9 @@ from datetime import timedelta, datetime, timezone
 from config.default_settings import HANNAH_PROMPT
 from utils import (
     addressee_instruction,
+    default_image_address_names,
     engaged_with_other_user,
+    extract_image_prompt,
     format_speaker_line,
     is_low_signal_message,
     looks_like_fact_question,
@@ -35,20 +37,6 @@ FALLBACK_QUOTES = [
     "bro what",
     "nah hold on",
     "one more time",
-]
-
-IMAGE_TRIGGER_WORDS = [
-    "imagine", "generate image", "create image", "make image",
-    "draw", "paint", "illustrate", "render image",
-    "generate a picture", "create a picture", "make a picture",
-    "generate art", "create art", "make art",
-    "text to image", "txt2img", "t2i",
-]
-
-IMAGE_FALSE_POSITIVES = [
-    "imagine that", "imagine if", "i can imagine", "just imagine",
-    "imagine being", "imagine having", "hard to imagine", "imagine this",
-    "imagine a world", "i imagine", "you imagine", "we imagine",
 ]
 
 FUZZY_DEDUP_THRESHOLD = 0.70
@@ -163,25 +151,26 @@ class Chat(commands.Cog):
         reply_to = self._reply_to_label(msg)
         return format_speaker_line(msg.author.display_name, content, reply_to)
 
-    def _is_image_request(self, message_content):
-        clean = re.sub(r"<@!?\d+>", "", message_content or "").strip()
-        clean_lower = clean.lower().strip()
-        for fp in IMAGE_FALSE_POSITIVES:
-            if fp in clean_lower:
-                return None
-        if not any(trigger in clean_lower for trigger in IMAGE_TRIGGER_WORDS):
-            return None
-        remaining = clean_lower
-        for trigger in IMAGE_TRIGGER_WORDS:
-            remaining = remaining.replace(trigger, "").strip()
-        filler_words = {
-            "a", "an", "the", "of", "for", "me", "please", "can", "you",
-            "could", "would", "something", "some", "this", "that",
-        }
-        remaining_words = [w for w in remaining.split() if w not in filler_words]
-        if len(remaining_words) < 2:
-            return None
-        return clean
+    def _image_address_names(self, settings=None):
+        extras = []
+        if settings:
+            extras.append(settings.get("personality_name"))
+            personality = settings.get("personality") or {}
+            extras.append(personality.get("preset"))
+        user = getattr(self.bot, "user", None)
+        if user is not None:
+            extras.extend((
+                getattr(user, "name", None),
+                getattr(user, "display_name", None),
+                getattr(user, "global_name", None),
+            ))
+        return default_image_address_names(*extras)
+
+    def _is_image_request(self, message_content, settings=None):
+        return extract_image_prompt(
+            message_content,
+            address_names=self._image_address_names(settings),
+        )
 
     def _is_direct_address(self, message, settings):
         is_mentioned = self.bot.user and self.bot.user.mentioned_in(message)
@@ -720,7 +709,9 @@ class Chat(commands.Cog):
             return
 
         # Image generation: keep mention gate for paid models.
-        image_prompt = self._is_image_request(message.content)
+        # Extract the visual subject only so "hannah draw a cat" does not
+        # become a portrait of Hannah.
+        image_prompt = self._is_image_request(message.content, settings)
         if image_prompt:
             skip_image = self._cooldown_active(channel_id, settings)
             if not skip_image:

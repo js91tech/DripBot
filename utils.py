@@ -250,3 +250,128 @@ def message_mentions_image_context(text: str) -> bool:
         text,
         re.I,
     ))
+
+
+# Conversational "draw/imagine/paint" requests. Longer phrases first so
+# "generate a picture" wins over leftover fragments.
+IMAGE_FALSE_POSITIVES = (
+    "imagine that", "imagine if", "i can imagine", "just imagine",
+    "imagine being", "imagine having", "hard to imagine", "imagine this",
+    "imagine a world", "i imagine", "you imagine", "we imagine",
+)
+
+_IMAGE_TRIGGER_RE = re.compile(
+    r"(?:"
+    r"generate\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|art)\s+(?:of\s+)?"
+    r"|create\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|art)\s+(?:of\s+)?"
+    r"|make\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|art)\s+(?:of\s+)?"
+    r"|render\s+(?:an?\s+)?image\s+(?:of\s+)?"
+    r"|text\s+to\s+image|txt2img|\bt2i\b"
+    r"|\billustrate(?:\s+me)?"
+    r"|\bpaint(?:\s+me)?"
+    r"|\bdraw(?:\s+me)?"
+    r"|\bimagine"
+    r")\b",
+    re.I,
+)
+
+_IMAGE_CHATTER_RE = re.compile(
+    r"^(?:"
+    r"hey+|hi+|yo+|sup|ok(?:ay)?|please|pls|plz|uhm+|um+|so|"
+    r"(?:can|could|would|will)\s+you(?:\s+please|\s+pls|\s+plz)?"
+    r"|i\s+(?:want|need)\s+you\s+to"
+    r"|(?:wanna|want\s+to|gonna)"
+    r")[\s,]+",
+    re.I,
+)
+
+_IMAGE_FILLER_WORDS = {
+    "a", "an", "the", "of", "for", "me", "please", "pls", "plz", "can", "you",
+    "could", "would", "will", "something", "some", "this", "that", "hey",
+    "hi", "yo", "ok", "okay", "to", "and", "just",
+}
+
+_DEFAULT_IMAGE_ADDRESS_NAMES = ("hannah", "hanah")
+_SKIP_IMAGE_ADDRESS_NAMES = {
+    "bot", "user", "discord", "app", "official", "the", "you", "her",
+}
+
+
+def default_image_address_names(*extra):
+    """Names that are the bot being addressed, not the image subject."""
+    names = set(_DEFAULT_IMAGE_ADDRESS_NAMES)
+    for value in extra:
+        text = str(value or "").strip().lower()
+        if len(text) >= 3 and text not in _SKIP_IMAGE_ADDRESS_NAMES:
+            names.add(text)
+    return names
+
+
+def _strip_leading_image_address(text, names):
+    """Remove 'hannah,' / bot-name prefixes so they are not the image subject."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+    name_list = sorted(
+        {n.strip().lower() for n in (names or []) if n and len(str(n).strip()) >= 3},
+        key=len,
+        reverse=True,
+    )
+    changed = True
+    while changed and cleaned:
+        changed = False
+        stripped = _IMAGE_CHATTER_RE.sub("", cleaned, count=1).strip()
+        if stripped != cleaned:
+            cleaned = stripped
+            changed = True
+            continue
+        for name in name_list:
+            match = re.match(rf"^{re.escape(name)}\b(?:[\s,.:;!\-]+|$)", cleaned, flags=re.I)
+            if match and match.end() < len(cleaned):
+                cleaned = cleaned[match.end():].strip()
+                changed = True
+                break
+    return cleaned
+
+
+def extract_image_prompt(message_content, address_names=None):
+    """
+    Turn a chat request into the visual subject only.
+
+    'hannah can you draw me a red dragon' -> 'a red dragon'
+    'draw hannah montana on stage' -> 'hannah montana on stage'
+    Returns None when this is not an image request.
+    """
+    clean = re.sub(r"<@!?&?\d+>", "", message_content or "").strip()
+    clean = re.sub(r"\s+", " ", clean)
+    if not clean:
+        return None
+
+    lower = clean.lower()
+    for false_positive in IMAGE_FALSE_POSITIVES:
+        if false_positive in lower:
+            return None
+
+    names = default_image_address_names(*(address_names or []))
+    working = _strip_leading_image_address(clean, names)
+    match = _IMAGE_TRIGGER_RE.search(working)
+    if not match:
+        return None
+
+    subject = working[match.end():].strip(" \t,.:;!-")
+    # 'draw me a cat' already consumed 'me' in the trigger; still handle leftovers.
+    subject = re.sub(r"^me\s+(?=(?:an?|some|the)\b)", "", subject, flags=re.I).strip()
+    subject = re.sub(
+        r"\s+(?:please|pls|plz|thanks|thx|ty|for me|real quick|rq)$",
+        "",
+        subject,
+        flags=re.I,
+    ).strip(" \t,.:;!-\"'")
+
+    content_words = [
+        word for word in re.findall(r"[a-z0-9]+", subject.lower())
+        if word not in _IMAGE_FILLER_WORDS
+    ]
+    if not content_words:
+        return None
+    return subject

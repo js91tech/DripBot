@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from typing import Optional, List
+from urllib.parse import quote
 
 logger = logging.getLogger("dripsletongue.llm")
 
@@ -141,7 +142,14 @@ class LLMHandler:
 
         body = {
             "model": model,
-            "messages": [{"role": "user", "content": f"Generate an image: {prompt}"}],
+            "messages": [{
+                "role": "user",
+                "content": (
+                    "Create an image of this subject, exactly as described. "
+                    "Do not substitute a different person or character:\n"
+                    f"{prompt}"
+                ),
+            }],
             "modalities": ["text", "image"],
             "temperature": 0.7,
             "max_tokens": 2048,
@@ -346,6 +354,16 @@ async def generate_llm_response(
     return result.get("content") if result else None
 
 
+def build_pollinations_url(prompt: str) -> str:
+    """URL-encode the full subject so Discord does not fetch only the first word."""
+    seed = hashlib.md5(prompt.encode()).hexdigest()[:8]
+    encoded_prompt = quote(prompt.strip(), safe="")
+    return (
+        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        f"?seed={seed}&width=1024&height=1024&nologo=true"
+    )
+
+
 async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Optional[str]:
     """
     Generate an image. Returns a data:image URL or a regular URL.
@@ -360,11 +378,7 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
     if model_name == "pollinations":
         # Pollinations.ai — always free, no API key needed
         try:
-            encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
-            url = (
-                f"https://image.pollinations.ai/prompt/"
-                f"{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
-            )
+            url = build_pollinations_url(prompt)
             # Verify the URL is reachable
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -383,9 +397,7 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
         if b64:
             return f"data:image/png;base64,{b64}"
         logger.warning("[IMG] Sidecar image gen returned nothing, falling back to Pollinations")
-        # Fallback to Pollinations
-        encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
-        return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
+        return build_pollinations_url(prompt)
 
     else:
         # OpenRouter with modalities (model_name is an actual LLM model ID)
@@ -394,8 +406,7 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
         if b64_or_url:
             return b64_or_url
         logger.warning(f"[IMG] OpenRouter image gen ({model_name}) failed, falling back to Pollinations")
-        encoded = hashlib.md5(prompt.encode()).hexdigest()[:8]
-        return f"https://image.pollinations.ai/prompt/{prompt}?seed={encoded}&width=1024&height=1024&nologo=true"
+        return build_pollinations_url(prompt)
 
 
 async def analyze_image_vision(image_url: str, prompt: str = "Describe this image in detail.") -> str:
