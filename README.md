@@ -4,27 +4,17 @@ Discord bot (Markov / LLM) lives at the repository root.
 
 ## CommercePulse
 
-The Next.js market-research app currently also lives in [`commercepulse/`](./commercepulse) on this branch.
+The dropshipping research app was moved to its own repository:
 
-A **root-level split** (ready to become `js91tech/CommercePulse`) is on branch [`cursor/commercepulse-standalone-4004`](https://github.com/js91tech/DripBot/tree/cursor/commercepulse-standalone-4004).
-
-This environment cannot create a new GitHub repository (GitHub App tokens are limited to DripBot). To finish the split, create an empty public repo named **CommercePulse**, then:
+**https://github.com/js91tech/CommercePulse**
 
 ```bash
-git clone --branch cursor/commercepulse-standalone-4004 --single-branch https://github.com/js91tech/DripBot.git CommercePulse
+git clone https://github.com/js91tech/CommercePulse.git
 cd CommercePulse
-git checkout -B main
-git remote set-url origin https://github.com/js91tech/CommercePulse.git
-git push -u origin main
-```
-
-Create the empty repo here: https://github.com/new?name=CommercePulse
-
-Until that push lands, run the nested copy:
-
-```bash
-cd commercepulse
+cp .env.example .env
 npm install
 npm run db:setup
 npm run dev
 ```
+
+Host it on Vercel (root directory = repo root) and use Neon for Postgres when you leave local SQLite. See that repo’s README for details.
