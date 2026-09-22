@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
@@ -9,6 +10,8 @@ import { ResearchBar } from "@/components/research/research-bar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const showHeaderSearch = pathname !== "/";
 
   return (
     <div className="flex min-h-screen">
@@ -33,7 +36,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Sidebar onNavigate={() => setOpen(false)} />
               </SheetContent>
             </Sheet>
-            <ResearchBar compact />
+            {showHeaderSearch ? (
+              <ResearchBar compact />
+            ) : (
+              <p className="text-sm text-muted-foreground">Market research, demand, and suppliers in one desk.</p>
+            )}
           </div>
         </header>
         <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
