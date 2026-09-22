@@ -194,11 +194,20 @@ export function matchSuppliers(query: string, limit = 6): SupplierRecord[] {
   const fulfillment = inferFulfillment(query);
   const hash = hashString(query.toLowerCase());
   const scored = CATALOG_SUPPLIERS.map((supplier, index) => {
+    const digitalOnly = supplier.categories.includes("digital") && supplier.estimatedShippingDaysMax === 0;
+    if (fulfillment === "PHYSICAL" && digitalOnly) {
+      return { supplier, score: -1 };
+    }
+    if (fulfillment === "DIGITAL" && !supplier.categories.includes("digital")) {
+      return { supplier, score: supplier.rating };
+    }
     const digitalFit = fulfillment === "DIGITAL" && supplier.categories.includes("digital") ? 30 : 0;
     const localBoost = supplier.region === "US" || supplier.region === "UK" || supplier.region === "EU" ? 8 : 0;
     const jitter = seededUnit(hash, index) * 10;
     return { supplier, score: supplier.rating * 10 + digitalFit + localBoost + jitter };
-  }).sort((a, b) => b.score - a.score);
+  })
+    .filter((row) => row.score >= 0)
+    .sort((a, b) => b.score - a.score);
 
   return scored.slice(0, limit).map(({ supplier }, index) => ({
     ...supplier,

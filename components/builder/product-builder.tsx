@@ -24,7 +24,15 @@ export function ProductBuilder({ suppliers }: { suppliers: SupplierRecord[] }) {
   const [inventoryCount, setInventoryCount] = useState("50");
   const [digitalFileUrl, setDigitalFileUrl] = useState("");
   const [autoLicense, setAutoLicense] = useState(true);
-  const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
+  const physicalSuppliers = suppliers.filter((item) => !item.categories.includes("digital"));
+  const digitalSuppliers = suppliers.filter((item) => item.categories.includes("digital"));
+  const [supplierId, setSupplierId] = useState(physicalSuppliers[0]?.id ?? suppliers[0]?.id ?? "");
+
+  function changeModel(next: FulfillmentModel) {
+    setModel(next);
+    const pool = next === "DIGITAL" ? digitalSuppliers : physicalSuppliers;
+    if (pool[0]?.id) setSupplierId(pool[0].id);
+  }
   const [status, setStatus] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -67,7 +75,9 @@ export function ProductBuilder({ suppliers }: { suppliers: SupplierRecord[] }) {
           autoLicense: model === "DIGITAL" ? autoLicense : false,
           weightOz: model === "PHYSICAL" ? preview.weightOz : undefined,
           inventoryCount: preview.inventoryCount,
-          supplierId: model === "PHYSICAL" ? supplierId || undefined : undefined,
+                        supplierId: model === "PHYSICAL"
+                          ? supplierId || physicalSuppliers[0]?.id
+                          : digitalSuppliers[0]?.id,
           tags: preview.tags,
         }),
       });
@@ -119,7 +129,7 @@ export function ProductBuilder({ suppliers }: { suppliers: SupplierRecord[] }) {
           <CardTitle>Listing details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs value={model} onValueChange={(value) => setModel(value as FulfillmentModel)}>
+          <Tabs value={model} onValueChange={(value) => changeModel(value as FulfillmentModel)}>
             <TabsList>
               <TabsTrigger value="PHYSICAL">Physical dropship</TabsTrigger>
               <TabsTrigger value="DIGITAL">Digital product</TabsTrigger>
@@ -141,9 +151,7 @@ export function ProductBuilder({ suppliers }: { suppliers: SupplierRecord[] }) {
                     value={supplierId}
                     onChange={(e) => setSupplierId(e.target.value)}
                   >
-                    {suppliers
-                      .filter((item) => item.region !== "US" || true)
-                      .map((item) => (
+                    {(model === "DIGITAL" ? digitalSuppliers : physicalSuppliers).map((item) => (
                         <option key={item.id} value={item.id} className="bg-background">
                           {item.name} · {item.warehouseLocation}
                         </option>
