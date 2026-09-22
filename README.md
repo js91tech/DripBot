@@ -2,7 +2,7 @@
 
 Automated market research, supply–demand scoring, and warehouse-aware supplier matching for **digital** and **physical** dropshipping businesses.
 
-The app is designed to run immediately on a laptop with **no API keys**. Optional OpenAI, Anthropic, and SerpAPI keys enrich summaries and shopping listings when present.
+The app runs on a laptop with **no API keys**. Optional OpenAI, Anthropic, and SerpAPI keys enrich summaries and shopping listings when present.
 
 ## What it does
 
@@ -25,7 +25,6 @@ Live marketplace scraping of Amazon / TikTok / Etsy is intentionally **not** imp
 ## Local setup
 
 ```bash
-cd commercepulse
 cp .env.example .env
 npm install
 npm run db:setup
@@ -49,30 +48,29 @@ If they are empty, mock fallbacks still produce full reports.
 ## Project layout
 
 ```
-commercepulse/
-  app/
-    page.tsx                 Dashboard + research bar
-    research/                Report list + detail
-    demand/                  Demand vs supply analyzer
-    suppliers/               Filterable warehouse directory
-    catalog/                 Digital / physical catalog
-    builder/                 CSV export builder
-    api/research|suppliers|demand|products|export
-  lib/
-    scoring.ts               Viability model
-    research-engine.ts       Orchestrates mock + live + LLM
-    supplier-engine.ts       Local vs overseas matching
-    csv-export.ts            Shopify / WooCommerce
-  prisma/schema.prisma       Product, Supplier, MarketTrend, ResearchReport
+app/
+  page.tsx                 Dashboard + research bar
+  research/                Report list + detail
+  demand/                  Demand vs supply analyzer
+  suppliers/               Filterable warehouse directory
+  catalog/                 Digital / physical catalog
+  builder/                 CSV export builder
+  api/research|suppliers|demand|products|export
+lib/
+  scoring.ts               Viability model
+  research-engine.ts       Orchestrates mock + live + LLM
+  supplier-engine.ts       Local vs overseas matching
+  csv-export.ts            Shopify / WooCommerce
+prisma/schema.prisma       Product, Supplier, MarketTrend, ResearchReport
 ```
 
-## Hosting (start here)
+## Hosting
 
-You do not need to pick a host before pushing to GitHub. Suggested path:
+Suggested path:
 
-1. **Keep the code on GitHub** (this repo / this folder).
-2. **Host the web app on Vercel** (free hobby plan is enough for a demo).
-3. **Host Postgres on Neon** when you outgrow SQLite.
+1. **GitHub** for source.
+2. **Vercel** for the web app (hobby plan is enough for a demo).
+3. **Neon Postgres** when you outgrow SQLite.
 
 ### Vercel + Neon (recommended)
 
@@ -86,16 +84,16 @@ datasource db {
 }
 ```
 
-3. Import the `commercepulse` directory as a Vercel project (Root Directory = `commercepulse`).
+3. Import this repository in Vercel (root directory = repo root).
 4. Set env vars: `DATABASE_URL`, optional `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `SERPAPI_KEY`.
-5. Add a Vercel build command of `npx prisma generate && npx prisma db push && npm run build`.
+5. Build command: `npx prisma generate && npx prisma db push && npm run build`.
 6. After the first deploy, run `npx prisma db seed` against Neon (or hit `/api/research` to generate reports).
 
 SQLite (`file:./dev.db`) is for local demo only. Serverless hosts cannot keep a writable SQLite file.
 
 ### Other hosts
 
-- **Railway / Render / Fly.io** — run the Next.js app + a Postgres addon. Use `npm run start` after `npm run build`.
+- **Railway / Render / Fly.io** — Next.js app + a Postgres addon. Use `npm run start` after `npm run build`.
 - **Docker** — `docker compose up db` for Postgres, then point `DATABASE_URL` at `postgresql://commercepulse:commercepulse@localhost:5432/commercepulse`.
 
 ## API
