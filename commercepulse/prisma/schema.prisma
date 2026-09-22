@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum FulfillmentModel {
+  DIGITAL
+  PHYSICAL
+}
+
+enum SaturationRisk {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Verdict {
+  BUY
+  PASS
+  WATCH
+}
+
+enum WarehouseRegion {
+  US
+  UK
+  EU
+  GLOBAL
+  CN
+}
+
+model Product {
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  description      String
+  category         String
+  niche            String
+  fulfillmentModel FulfillmentModel
+  sku              String            @unique
+  listingPrice     Float
+  costPrice        Float
+  currency         String            @default("USD")
+  digitalFileUrl   String?
+  licenseKeyPrefix String?
+  autoLicense      Boolean           @default(false)
+  weightOz         Float?
+  shippingCostEst  Float?
+  inventoryCount   Int?
+  viabilityScore   Int?
+  tags             String            @default("[]")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  suppliers        ProductSupplier[]
+  reports          ResearchReport[]
+  licenseKeys      LicenseKey[]
+}
+
+model LicenseKey {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  redeemed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Supplier {
+  id                       String            @id @default(cuid())
+  name                     String
+  warehouseLocation        String
+  region                   WarehouseRegion
+  estimatedShippingDaysMin Int
+  estimatedShippingDaysMax Int
+  unitCost                 Float
+  moq                      Int
+  returnPolicy             String
+  website                  String?
+  rating                   Float             @default(4.5)
+  verified                 Boolean           @default(false)
+  categories               String            @default("[]")
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  products                 ProductSupplier[]
+}
+
+model ProductSupplier {
+  productId  String
+  supplierId String
+  unitCost   Float?
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@id([productId, supplierId])
+}
+
+model MarketTrend {
+  id                String          @id @default(cuid())
+  keyword           String
+  platform          String
+  searchVolume      Int
+  searchVolumeDelta Float
+  socialMomentum    Float
+  adActivityScore   Int
+  sampleListings    String          @default("[]")
+  capturedAt        DateTime        @default(now())
+  reportId          String?
+  report            ResearchReport? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model ResearchReport {
+  id                    String         @id @default(cuid())
+  query                 String
+  niche                 String?
+  category              String?
+  targetAudience        String?
+  viabilityScore        Int
+  profitMarginPotential Float
+  competitionDensity    Float
+  viralCapability       Float
+  recommendedPriceMin   Float
+  recommendedPriceMax   Float
+  personas              String         @default("[]")
+  demandSearchVolume    Int
+  demandSocialMomentum  Float
+  demandAdActivity      Int
+  supplyCompetitorCount Int
+  saturationRisk        SaturationRisk
+  verdict               Verdict
+  predictedMarginPct    Float
+  summary               String
+  sources               String         @default("[]")
+  monthlyTrend          String         @default("[]")
+  usedLiveData          Boolean        @default(false)
+  usedLlm               Boolean        @default(false)
+  productId             String?
+  product               Product?       @relation(fields: [productId], references: [id])
+  trends                MarketTrend[]
+  createdAt             DateTime       @default(now())
+}
