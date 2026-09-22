@@ -39,7 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {showHeaderSearch ? (
               <ResearchBar compact />
             ) : (
-              <p className="text-sm text-muted-foreground">Market research, demand, and suppliers in one desk.</p>
+              <p className="text-sm text-muted-foreground">Market research, demand, and suppliers in one place.</p>
             )}
           </div>
         </header>
