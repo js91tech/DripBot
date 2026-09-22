@@ -3,6 +3,7 @@ import unittest
 from config.default_settings import (
     PERSONALITY_PRESETS,
     build_personality_settings_update,
+    is_chatty_personality,
     normalize_personality_preset,
 )
 
@@ -50,6 +51,24 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(trump["personality_name"], "Donald Trump")
         self.assertEqual(trump["personality"]["preset"], "donald_trump")
         self.assertEqual(trump["personality_prompt"], PERSONALITY_PRESETS["donald_trump"]["prompt"])
+
+    def test_kirk_and_trump_are_chatty_presets(self):
+        self.assertTrue(is_chatty_personality("charlie kirk"))
+        self.assertTrue(is_chatty_personality("trump"))
+        self.assertTrue(is_chatty_personality(build_personality_settings_update("charlie_kirk")))
+        self.assertTrue(is_chatty_personality(build_personality_settings_update("donald_trump")))
+        self.assertFalse(is_chatty_personality("hannah"))
+        self.assertFalse(is_chatty_personality(build_personality_settings_update("hannah")))
+
+    def test_chatty_prompts_ask_for_longer_replies(self):
+        kirk = PERSONALITY_PRESETS["charlie_kirk"]["prompt"].lower()
+        trump = PERSONALITY_PRESETS["donald_trump"]["prompt"].lower()
+        self.assertIn("chatty", kirk)
+        self.assertIn("follow-up", kirk)
+        self.assertNotIn("1-3 short", kirk)
+        self.assertIn("chatty", trump)
+        self.assertIn("keep talking", trump)
+        self.assertNotIn("2-4 short", trump)
 
 
 if __name__ == "__main__":

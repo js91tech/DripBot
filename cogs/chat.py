@@ -9,7 +9,7 @@ import time
 import re
 from collections import deque
 from datetime import timedelta, datetime, timezone
-from config.default_settings import HANNAH_PROMPT
+from config.default_settings import HANNAH_PROMPT, is_chatty_personality
 from utils import (
     addressee_instruction,
     default_image_address_names,
@@ -43,6 +43,7 @@ FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
 MIN_REPLY_COOLDOWN_SECONDS = 5
 MAX_REPLY_CHARS = 200
+CHATTY_MAX_REPLY_CHARS = 700
 HISTORY_LIMIT = 20
 CONSOLIDATED_SUMMARY_CHARS = 450
 
@@ -50,6 +51,12 @@ RESPONSE_STYLE_PROMPT = (
     "GLOBAL REPLY STYLE: Reply like Discord chat — short, casual, reactive. "
     "Send one message with at most two tiny lines. Fragments are fine. "
     "No paragraphs, lists, or assistant voice."
+)
+
+CHATTY_REPLY_STYLE_PROMPT = (
+    "GLOBAL REPLY STYLE: Be chatty in Discord — keep the conversation going. "
+    "A short paragraph or several sentences is good. Riff, add a take, ask a follow-up. "
+    "No assistant voice and no numbered lists. Do not collapse into a one-liner."
 )
 
 
@@ -75,6 +82,19 @@ class Chat(commands.Cog):
 
     def _personality_prompt(self, settings):
         return settings.get("personality_prompt") or HANNAH_PROMPT
+
+    def _is_chatty_personality(self, settings):
+        return is_chatty_personality(settings or {})
+
+    def _reply_style_prompt(self, settings):
+        if self._is_chatty_personality(settings):
+            return CHATTY_REPLY_STYLE_PROMPT
+        return RESPONSE_STYLE_PROMPT
+
+    def _reply_max_tokens(self, settings, default=120):
+        if self._is_chatty_personality(settings):
+            return max(default, 360)
+        return default
 
     def _is_fuzzy_duplicate(self, text, guild_id):
         text_words = set(text.lower().split())
@@ -104,17 +124,21 @@ class Chat(commands.Cog):
             return False
         return time.time() - last_reply_at < self._effective_cooldown_seconds(settings)
 
-    def _trim_reply(self, text):
+    def _trim_reply(self, text, settings=None):
         if not text:
             return text
+        chatty = self._is_chatty_personality(settings)
+        max_lines = 6 if chatty else 2
+        max_sentences = 8 if chatty else 2
+        max_chars = CHATTY_MAX_REPLY_CHARS if chatty else MAX_REPLY_CHARS
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        text = " ".join(lines[:2]) if lines else text.strip()
+        text = " ".join(lines[:max_lines]) if lines else text.strip()
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        if len(sentences) > 2:
-            text = " ".join(sentences[:2]).strip()
-        if len(text) > MAX_REPLY_CHARS:
-            shortened = text[:MAX_REPLY_CHARS].rsplit(" ", 1)[0].strip()
-            text = shortened or text[:MAX_REPLY_CHARS].strip()
+        if len(sentences) > max_sentences:
+            text = " ".join(sentences[:max_sentences]).strip()
+        if len(text) > max_chars:
+            shortened = text[:max_chars].rsplit(" ", 1)[0].strip()
+            text = shortened or text[:max_chars].strip()
         return text
 
     def _humanize_content(self, text, guild):
@@ -390,12 +414,21 @@ class Chat(commands.Cog):
                     chat_history.insert(0, {"role": "user", "content": f"{msg.author.display_name}: {clean_msg_content}"})
             if len(chat_history) < 8:
                 continue
-            prompt = (
-                "You just walked into the room and saw this conversation. "
-                "If a random short thought pops up, say it. If nothing, say NO_THOUGHT. "
-                + RESPONSE_STYLE_PROMPT
-                + "\n" + await world_context_line()
-            )
+            if self._is_chatty_personality(settings):
+                prompt = (
+                    self._personality_prompt(settings)
+                    + "\nYou just walked into the room and saw this conversation. "
+                    "If you have something to add, jump in and keep it chatty. If nothing, say NO_THOUGHT.\n"
+                    + self._reply_style_prompt(settings)
+                    + "\n" + await world_context_line()
+                )
+            else:
+                prompt = (
+                    "You just walked into the room and saw this conversation. "
+                    "If a random short thought pops up, say it. If nothing, say NO_THOUGHT. "
+                    + self._reply_style_prompt(settings)
+                    + "\n" + await world_context_line()
+                )
             system_msg = {
                 "role": "system",
                 "content": prompt,
@@ -409,11 +442,11 @@ class Chat(commands.Cog):
                 chat_history,
                 auto_router=settings.get("auto_router_enabled", False),
                 allowed_models=settings.get("auto_router_allowed_models") or None,
-                max_tokens=80,
+                max_tokens=self._reply_max_tokens(settings, default=80),
             )
             if response and "NO_THOUGHT" not in response.upper():
                 response = strip_leading_address(response)
-                response = self._trim_reply(response)
+                response = self._trim_reply(response, settings)
                 try:
                     await target_channel.send(sanitize_message(response))
                 except Exception:
@@ -834,7 +867,7 @@ class Chat(commands.Cog):
                 consolidated = await self.db.get_consolidated_memory(guild_id)
 
             dynamic_prompt = self._personality_prompt(settings)
-            dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
+            dynamic_prompt += f"\n\n{self._reply_style_prompt(settings)}"
             dynamic_prompt += f"\n{addressee_instruction(message.author.display_name)}"
             dynamic_prompt += f"\n{await world_context_line()}"
             if consolidated and consolidated.get("summary"):
@@ -862,7 +895,7 @@ class Chat(commands.Cog):
                 chat_history,
                 auto_router=settings.get("auto_router_enabled", False),
                 allowed_models=settings.get("auto_router_allowed_models") or None,
-                max_tokens=120,
+                max_tokens=self._reply_max_tokens(settings),
             )
 
             final_content = None
@@ -885,7 +918,7 @@ class Chat(commands.Cog):
                     return
                 final_content = random.choice(FALLBACK_QUOTES)
 
-            final_content = self._trim_reply(final_content)
+            final_content = self._trim_reply(final_content, settings)
             try:
                 await message.channel.send(
                     final_content,
