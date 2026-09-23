@@ -170,13 +170,25 @@ def strip_leading_address(text, names=None):
             cleaned,
             flags=re.IGNORECASE,
         )
-    cleaned = re.sub(r"^.{0,30}?:\s*", "", cleaned).strip()
+    # Only peel a short name label ("Alex:" / "Dr Umar:"). A blanket
+    # "anything before the first colon" strip was deleting real sentences
+    # such as "Here's the practical problem: rent went up."
+    name_label = re.match(
+        r"^(@?[A-Za-z0-9_][A-Za-z0-9_'\-]{0,24}"
+        r"(?:\s+[A-Za-z0-9_][A-Za-z0-9_'\-]{0,24}){0,2})\s*:\s*",
+        cleaned,
+    )
+    if name_label:
+        cleaned = cleaned[name_label.end():].strip()
     cleaned = re.sub(r"<@!?\d+>", "", cleaned).strip()
     return cleaned
 
 
 def sanitize_message(text):
     """Cleans up bot messages to prevent Discord API errors."""
+    if not text:
+        return ""
+    text = str(text)
     # Remove @everyone and @here to prevent mass pings
     text = text.replace("@everyone", "").replace("@here", "")
     # Remove duplicate whitespace
