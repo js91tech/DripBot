@@ -48,6 +48,14 @@ _SKIP_CONTENT_TYPES = {
     "reasoning_text",
     "redacted_thinking",
 }
+# Planning lines are not a chat reply. A finished sentence after them is.
+_COT_LINE_RE = re.compile(
+    r"^(?:"
+    r"the user|i should|i need to|let me|first,|okay, so|analysis|"
+    r"reasoning|step \d|to answer|looking at|the question"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def strip_model_thinking(text: str) -> str:
@@ -93,6 +101,49 @@ def content_to_visible_text(content) -> str:
     return strip_model_thinking(raw).strip()
 
 
+def reply_from_reasoning(text: str) -> str:
+    """
+    Pull a chat sentence out of a reasoning trace.
+
+    Some OpenRouter models leave `content` empty and put the actual reply in
+    `reasoning` / `reasoning_content`. Planning lines are skipped. The last
+    leftover paragraph is the sentence the bot should send.
+    """
+    cleaned = strip_model_thinking(text or "")
+    if not cleaned:
+        return ""
+    paragraphs = [part.strip() for part in re.split(r"\n+", cleaned) if part.strip()]
+    for paragraph in reversed(paragraphs):
+        if _COT_LINE_RE.match(paragraph):
+            continue
+        if len(paragraph) > 600:
+            continue
+        return paragraph
+    return ""
+
+
+def _message_reasoning_text(message: dict) -> str:
+    chunks = []
+    for key in ("reasoning", "reasoning_content"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            chunks.append(value.strip())
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        for item in details:
+            if isinstance(item, str) and item.strip():
+                chunks.append(item.strip())
+                continue
+            if not isinstance(item, dict):
+                continue
+            for key in ("text", "summary", "content"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    chunks.append(value.strip())
+                    break
+    return "\n".join(chunks)
+
+
 def visible_reply_from_completion(data) -> str:
     """Pull the visible assistant sentence out of a chat-completions payload."""
     if not isinstance(data, dict):
@@ -103,7 +154,10 @@ def visible_reply_from_completion(data) -> str:
     message = choices[0].get("message") or {}
     if not isinstance(message, dict):
         return ""
-    return content_to_visible_text(message.get("content"))
+    visible = content_to_visible_text(message.get("content"))
+    if visible:
+        return visible
+    return reply_from_reasoning(_message_reasoning_text(message))
 
 
 def flatten_text_content(content):
