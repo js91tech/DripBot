@@ -31,8 +31,42 @@ class PersonalityPresetTests(unittest.TestCase):
         ):
             self.assertEqual(normalize_personality_preset(alias), "donald_trump")
 
+    def test_nicki_minaj_aliases(self):
+        for alias in (
+            "nicki_minaj",
+            "nicki minaj",
+            "Nicki Minaj",
+            "nikki minaj",
+            "nikki",
+            "nicki",
+            "onika",
+            "barbie",
+        ):
+            self.assertEqual(normalize_personality_preset(alias), "nicki_minaj")
+
+    def test_dr_umar_aliases(self):
+        for alias in (
+            "dr_umar",
+            "dr umar",
+            "Dr. Umar",
+            "Dr Umar Johnson",
+            "doctor umar",
+            "umar",
+            "umar johnson",
+        ):
+            self.assertEqual(normalize_personality_preset(alias), "dr_umar")
+
+    def test_charlie_kirk_is_practical(self):
+        prompt = PERSONALITY_PRESETS["charlie_kirk"]["prompt"].lower()
+        self.assertIn("practical", prompt)
+        self.assertIn("jobs", prompt)
+        self.assertNotIn("prove me wrong", prompt)
+        self.assertNotIn("demand definitions", prompt)
+        self.assertNotIn("folding-table", prompt)
+        self.assertNotIn("debate", prompt)
+
     def test_new_presets_are_selectable(self):
-        for preset_id in ("charlie_kirk", "donald_trump"):
+        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
             preset = PERSONALITY_PRESETS[preset_id]
             self.assertTrue(preset["name"])
@@ -50,6 +84,16 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(trump["personality_name"], "Donald Trump")
         self.assertEqual(trump["personality"]["preset"], "donald_trump")
         self.assertEqual(trump["personality_prompt"], PERSONALITY_PRESETS["donald_trump"]["prompt"])
+
+        nicki = build_personality_settings_update("nikki minaj")
+        self.assertEqual(nicki["personality_name"], "Nicki Minaj")
+        self.assertEqual(nicki["personality"]["preset"], "nicki_minaj")
+        self.assertEqual(nicki["personality_prompt"], PERSONALITY_PRESETS["nicki_minaj"]["prompt"])
+
+        umar = build_personality_settings_update("dr. umar")
+        self.assertEqual(umar["personality_name"], "Dr. Umar")
+        self.assertEqual(umar["personality"]["preset"], "dr_umar")
+        self.assertEqual(umar["personality_prompt"], PERSONALITY_PRESETS["dr_umar"]["prompt"])
 
 
 if __name__ == "__main__":

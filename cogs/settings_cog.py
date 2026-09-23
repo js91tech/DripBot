@@ -25,8 +25,10 @@ def _personality_choices():
         "bender": "Bender (Rude Robot)",
         "the_brain": "The Brain (Megalomaniac)",
         "conquest": "Conquest (Viltrumite Warlord)",
-        "charlie_kirk": "Charlie Kirk (Campus Debater)",
+        "charlie_kirk": "Charlie Kirk (Practical Conservative)",
         "donald_trump": "Donald Trump (America First)",
+        "nicki_minaj": "Nicki Minaj (Queens Texting Voice)",
+        "dr_umar": "Dr. Umar (Pan-African Lecturer)",
     }
     return [
         app_commands.Choice(name=labels.get(preset_id, preset["name"]), value=preset_id)
