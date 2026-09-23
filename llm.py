@@ -65,7 +65,7 @@ def content_to_visible_text(content) -> str:
 
     Accepts a string or a list of content blocks. Thinking blocks are dropped.
     An unfinished <think> with no answer becomes an empty string so the caller
-    can retry or send a fallback instead of posting the thought.
+    can retry instead of posting the thought.
     """
     if content is None:
         return ""
