@@ -11,11 +11,13 @@ Features:
 Drop this file in your project root, replacing the old llm.py.
 """
 
+import asyncio
 import aiohttp
 import hashlib
 import json
 import logging
 import os
+import re
 from typing import Optional, List
 from urllib.parse import quote
 
@@ -27,6 +29,172 @@ SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
 
 # Default model (used when auto-router is off)
 DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
+
+# Discord replies are one or two sentences. Reasoning models will spend a
+# small max_tokens budget on hidden thinking and return an empty `content`,
+# which shows up in chat as typing with no message. Ask for no reasoning
+# unless the provider rejects that.
+_THINK_BLOCK_RE = re.compile(
+    r"<(?:think|thinking|reasoning)\b[^>]*>.*?</(?:think|thinking|reasoning)>",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNCLOSED_THINK_RE = re.compile(
+    r"<(?:think|thinking|reasoning)\b[^>]*>.*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_SKIP_CONTENT_TYPES = {
+    "thinking",
+    "reasoning",
+    "reasoning_text",
+    "redacted_thinking",
+}
+
+
+def strip_model_thinking(text: str) -> str:
+    """Remove chain-of-thought wrappers so only the chat sentence remains."""
+    if not text:
+        return ""
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    cleaned = _UNCLOSED_THINK_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def content_to_visible_text(content) -> str:
+    """
+    Normalize provider content to the user-visible reply.
+
+    Accepts a string or a list of content blocks. Thinking blocks are dropped.
+    An unfinished <think> with no answer becomes an empty string so the caller
+    can retry or send a fallback instead of posting the thought.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        raw = content
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+                continue
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "text").lower()
+            if block_type in _SKIP_CONTENT_TYPES:
+                continue
+            text = block.get("text")
+            if text is None and isinstance(block.get("content"), str):
+                text = block["content"]
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+        raw = "\n".join(parts)
+    else:
+        raw = str(content)
+    return strip_model_thinking(raw).strip()
+
+
+def visible_reply_from_completion(data) -> str:
+    """Pull the visible assistant sentence out of a chat-completions payload."""
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return ""
+    message = choices[0].get("message") or {}
+    if not isinstance(message, dict):
+        return ""
+    return content_to_visible_text(message.get("content"))
+
+
+def flatten_text_content(content):
+    """
+    Turn text-only content blocks into a plain string.
+
+    Returns None when a block is multimodal so the original payload is kept.
+    Free chat models often 400 on text wrapped as a content array, and that
+    failure used to stop the bot after it had already started typing.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            return None
+        block_type = str(block.get("type") or "text").lower()
+        if block_type not in {"text", "input_text"}:
+            return None
+        text = block.get("text")
+        if text is None:
+            text = block.get("content")
+        if not isinstance(text, str):
+            return None
+        parts.append(text)
+    return "\n".join(parts)
+
+
+def flatten_message(msg):
+    if not isinstance(msg, dict):
+        return msg
+    flattened = flatten_text_content(msg.get("content"))
+    if flattened is None:
+        return msg
+    return {**msg, "content": flattened}
+
+
+def route_chat_messages(system_prompt, messages, auto_router=False, allowed_models=None):
+    """
+    Split the cog's embedded routing system message from the transcript.
+
+    A later system note such as "--- A long time passes ---" must not replace
+    the personality prompt, or the model ignores the instruction to actually
+    answer and the visible reply comes back empty.
+    """
+    model = None
+    clean_messages = []
+    actual_system_prompt = system_prompt
+    use_auto = bool(auto_router)
+    allowed = list(allowed_models) if allowed_models else None
+
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        is_routing = msg.get("role") == "system" and (
+            "model" in msg or "auto_router" in msg or "allowed_models" in msg
+        )
+        if is_routing:
+            if msg.get("model"):
+                model = msg["model"]
+            if "auto_router" in msg:
+                use_auto = bool(msg["auto_router"])
+            if msg.get("allowed_models"):
+                allowed = list(msg["allowed_models"])
+            content = msg.get("content") or ""
+            if isinstance(content, str) and content.strip():
+                actual_system_prompt = content
+            continue
+        clean_messages.append(flatten_message(msg))
+
+    if not model:
+        model = DEFAULT_MODEL
+    return {
+        "model": model,
+        "system_prompt": actual_system_prompt,
+        "messages": clean_messages,
+        "auto_router": use_auto,
+        "allowed_models": allowed,
+    }
+
+
+def _reasoning_request_rejected(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    return "reasoning" in lowered
 
 
 class LLMHandler:
@@ -56,11 +224,12 @@ class LLMHandler:
             logger.error("No OPENROUTER_API_KEY set")
             return None
 
-        # Build the messages list
+        # Build the messages list. Text-only blocks become strings so
+        # providers that reject content arrays still return a sentence.
         final_messages = []
         if system_prompt:
             final_messages.append({"role": "system", "content": system_prompt})
-        final_messages.extend(messages)
+        final_messages.extend(flatten_message(msg) for msg in messages)
 
         # Determine model
         if auto_router:
@@ -70,12 +239,14 @@ class LLMHandler:
         else:
             effective_model = self.default_model
 
-        # Build request body
+        # Build request body. effort=none keeps the token budget on the
+        # visible sentence instead of an empty content field.
         body = {
             "model": effective_model,
             "messages": final_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "reasoning": {"effort": "none"},
         }
 
         # Add allowed_models filter for auto-router
@@ -89,6 +260,50 @@ class LLMHandler:
             "X-Title": "Dripsletongue Bot",
         }
 
+        result = await self._post_chat(body, headers)
+        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
+            logger.warning("Provider rejected reasoning=none; retrying without it")
+            body = dict(body)
+            body.pop("reasoning", None)
+            body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
+            result = await self._post_chat(body, headers)
+        elif result["status"] in {429, 500, 502, 503, 504}:
+            logger.warning(f"OpenRouter {result['status']}; retrying once")
+            await asyncio.sleep(1.0)
+            result = await self._post_chat(body, headers)
+        elif result["status"] == 200 and not result["text"]:
+            # Tokens were spent before a sentence existed (usually reasoning
+            # or a cut-off <think> block). Give the answer a larger budget.
+            logger.warning(
+                "OpenRouter returned no visible reply (finish_reason=%s); retrying",
+                result.get("finish_reason"),
+            )
+            body = dict(body)
+            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
+            body["reasoning"] = {"effort": "minimal"}
+            result = await self._post_chat(body, headers)
+
+        if result["status"] != 200 or not result["text"]:
+            if result["status"] == 200:
+                logger.warning("OpenRouter reply stayed empty after retry")
+            return None
+
+        return {
+            "content": result["text"],
+            "model_used": result.get("model_used") or effective_model,
+            "usage": result.get("usage") or {},
+        }
+
+    async def _post_chat(self, body: dict, headers: dict) -> dict:
+        """POST one completion. Never raises; status 0 means a transport error."""
+        empty = {
+            "status": 0,
+            "error": "",
+            "text": "",
+            "finish_reason": None,
+            "model_used": body.get("model"),
+            "usage": {},
+        }
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -97,29 +312,42 @@ class LLMHandler:
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=90),
                 ) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        logger.error(f"OpenRouter {resp.status}: {error_text[:300]}")
-                        return None
-
-                    data = await resp.json()
-
-                    content = ""
-                    if data.get("choices"):
-                        content = data["choices"][0].get("message", {}).get("content", "")
-
-                    return {
-                        "content": content,
-                        "model_used": data.get("model", effective_model),
-                        "usage": data.get("usage", {}),
-                    }
-
+                    raw = await resp.text()
+                    status = resp.status
         except aiohttp.ClientError as e:
             logger.error(f"OpenRouter request failed: {e}")
-            return None
+            empty["error"] = str(e)
+            return empty
         except Exception as e:
             logger.error(f"Chat error: {e}")
-            return None
+            empty["error"] = str(e)
+            return empty
+
+        if status != 200:
+            empty["status"] = status
+            empty["error"] = raw
+            logger.error(f"OpenRouter {status}: {raw[:300]}")
+            return empty
+
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            empty["status"] = status
+            empty["error"] = raw[:300]
+            return empty
+
+        finish_reason = None
+        choices = data.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            finish_reason = choices[0].get("finish_reason")
+        return {
+            "status": status,
+            "error": "",
+            "text": visible_reply_from_completion(data),
+            "finish_reason": finish_reason,
+            "model_used": data.get("model", body.get("model")),
+            "usage": data.get("usage") or {},
+        }
 
     # ── OpenRouter Image Generation (via modalities) ──
 
@@ -319,39 +547,24 @@ async def generate_llm_response(
     max_tokens budget so short Discord replies stay cheap.
     Returns the response content string, or None on failure.
     """
-    model = None
-    clean_messages = []
-    actual_system_prompt = system_prompt
-    use_auto = bool(auto_router)
-    allowed = list(allowed_models) if allowed_models else None
-
-    for msg in messages:
-        if msg.get("role") == "system":
-            if "model" in msg:
-                model = msg["model"]
-            if "auto_router" in msg:
-                use_auto = bool(msg["auto_router"])
-            if msg.get("allowed_models"):
-                allowed = list(msg["allowed_models"])
-            content = msg.get("content", "")
-            if content:
-                actual_system_prompt = content
-        else:
-            clean_messages.append(msg)
-
-    if not model:
-        model = "meta-llama/llama-4-maverick:free"
+    routed = route_chat_messages(
+        system_prompt,
+        messages,
+        auto_router=auto_router,
+        allowed_models=allowed_models,
+    )
 
     result = await _llm_handler.chat(
-        clean_messages,
-        model=model,
-        system_prompt=actual_system_prompt,
-        auto_router=use_auto,
-        allowed_models=allowed,
+        routed["messages"],
+        model=routed["model"],
+        system_prompt=routed["system_prompt"],
+        auto_router=routed["auto_router"],
+        allowed_models=routed["allowed_models"],
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    return result.get("content") if result else None
+    text = content_to_visible_text(result.get("content")) if result else ""
+    return text or None
 
 
 def build_pollinations_url(prompt: str) -> str:
