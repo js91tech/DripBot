@@ -1,3 +1,4 @@
+import asyncio
 import os
 import io
 import base64
@@ -35,9 +36,11 @@ CONSOLIDATED_SUMMARY_CHARS = 450
 
 RESPONSE_STYLE_PROMPT = (
     "GLOBAL REPLY STYLE: Reply like Discord chat — short, casual, reactive. "
-    "Send one message with at most two tiny lines. Fragments are fine. "
+    "Send one finished sentence and end it with . or ? or !. "
+    "Do not stop halfway through a sentence. "
     "No paragraphs, lists, or assistant voice."
 )
+SLOWMODE_ERROR_CODE = 20016
 
 
 class Chat(commands.Cog):
@@ -133,8 +136,18 @@ class Chat(commands.Cog):
         self._remember_reply(guild_id, outgoing)
         return outgoing
 
+    async def _wait_out_slowmode(self, message):
+        delay = getattr(message.channel, "slowmode_delay", None)
+        if delay is None:
+            delay = 5
+        try:
+            delay = float(delay)
+        except (TypeError, ValueError):
+            delay = 5
+        await asyncio.sleep(min(max(delay, 0), 30) + 0.2)
+
     async def _try_send_reply(self, message, content, mention_author):
-        """Send a real sentence, then retry as a plain message if the reply reference fails."""
+        """Send a real sentence. Retry without the reply reference, and wait out slowmode."""
         content = self._text_to_send(content)
         if not content:
             return None
@@ -146,12 +159,22 @@ class Chat(commands.Cog):
             )
             return content
         except discord.errors.HTTPException as e:
-            print(f"Reply failed ({e}); sending without reference")
+            print(f"Reply failed ({e})")
+            if getattr(e, "code", None) == SLOWMODE_ERROR_CODE:
+                await self._wait_out_slowmode(message)
         try:
             await message.channel.send(content)
             return content
         except discord.errors.HTTPException as e:
             print(f"Error sending message: {e}")
+            if getattr(e, "code", None) != SLOWMODE_ERROR_CODE:
+                return None
+            await self._wait_out_slowmode(message)
+        try:
+            await message.channel.send(content)
+            return content
+        except discord.errors.HTTPException as e:
+            print(f"Error sending message after slowmode: {e}")
             return None
 
     def _humanize_content(self, text, guild):
@@ -861,8 +884,10 @@ class Chat(commands.Cog):
                 return
 
         delivered = None
+        final_content = None
+        use_mention = False
+        want_gif = False
         try:
-            async with message.channel.typing():
                 image_description = await self._get_image_context(message, settings)
                 web_context = await self._enrich_with_search(message, settings)
 
@@ -920,8 +945,6 @@ class Chat(commands.Cog):
                 )
                 final_content = self._accept_llm_text(llm_response, guild_id, speaker_names)
                 if not final_content:
-                    # Empty content, a cut-off thought, or a duplicate used to
-                    # stop here after typing had already started.
                     print(f"[{guild_id}] No usable reply yet; retrying once.")
                     llm_response = await generate_llm_response(
                         dynamic_prompt,
@@ -930,7 +953,18 @@ class Chat(commands.Cog):
                         **llm_kwargs,
                     )
                     final_content = self._accept_llm_text(llm_response, guild_id, speaker_names)
+        except Exception as e:
+            print(f"[{guild_id}] Error while writing a reply: {e}")
+            final_content = None
 
+        # Typing only starts once a real sentence exists, so the indicator
+        # cannot sit there and then disappear.
+        if not final_content:
+            print(f"[{guild_id}] No sentence to send.")
+            return
+
+        try:
+            async with message.channel.typing():
                 delivered = await self._try_send_reply(message, final_content, use_mention)
                 if delivered and want_gif and not delivered.startswith("http"):
                     search_words = [w for w in (message.content or "").lower().split() if len(w) > 3]
@@ -942,7 +976,7 @@ class Chat(commands.Cog):
                         except discord.errors.HTTPException:
                             pass
         except Exception as e:
-            print(f"[{guild_id}] Error while replying: {e}")
+            print(f"[{guild_id}] Error while sending a reply: {e}")
 
         if not delivered:
             return
