@@ -26,19 +26,6 @@ from utils import (
 )
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 
-FALLBACK_QUOTES = [
-    "wait what",
-    "huh",
-    "say that again",
-    "i lost the plot",
-    "ok and",
-    "lmao wait",
-    "i need context",
-    "bro what",
-    "nah hold on",
-    "one more time",
-]
-
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
 MIN_REPLY_COOLDOWN_SECONDS = 5
@@ -124,11 +111,8 @@ class Chat(commands.Cog):
         return text.strip()
 
     def _text_to_send(self, text):
-        """A non-empty Discord message. Typing must never end in silence."""
-        cleaned = sanitize_message(self._trim_reply(text or ""))
-        if cleaned:
-            return cleaned
-        return random.choice(FALLBACK_QUOTES)
+        """Sanitize a model sentence. Empty input stays empty — no dummy quotes."""
+        return sanitize_message(self._trim_reply(text or ""))
 
     def _remember_reply(self, guild_id, text):
         recent = self.bot_recent_messages.setdefault(guild_id, [])
@@ -150,8 +134,10 @@ class Chat(commands.Cog):
         return outgoing
 
     async def _try_send_reply(self, message, content, mention_author):
-        """Send a sentence, then retry as a plain message if the reply reference fails."""
+        """Send a real sentence, then retry as a plain message if the reply reference fails."""
         content = self._text_to_send(content)
+        if not content:
+            return None
         try:
             await message.channel.send(
                 content,
@@ -958,8 +944,6 @@ class Chat(commands.Cog):
         except Exception as e:
             print(f"[{guild_id}] Error while replying: {e}")
 
-        if not delivered:
-            delivered = await self._try_send_reply(message, None, False)
         if not delivered:
             return
 

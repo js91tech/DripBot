@@ -2,7 +2,7 @@ import unittest
 
 import discord
 
-from cogs.chat import FALLBACK_QUOTES, Chat
+from cogs.chat import Chat
 from llm import (
     content_to_visible_text,
     flatten_text_content,
@@ -92,10 +92,9 @@ class OutgoingReplyTests(unittest.TestCase):
             "rent went up.",
         )
 
-    def test_empty_model_text_still_sends_a_sentence(self):
-        sent = self.chat._text_to_send("")
-        self.assertTrue(sent)
-        self.assertIn(sent, FALLBACK_QUOTES)
+    def test_empty_model_text_is_not_replaced_with_a_quote(self):
+        self.assertEqual(self.chat._text_to_send(""), "")
+        self.assertEqual(self.chat._text_to_send(None), "")
 
     def test_accepts_a_real_sentence_and_rejects_a_duplicate(self):
         first = self.chat._accept_llm_text(
@@ -110,7 +109,7 @@ class OutgoingReplyTests(unittest.TestCase):
             speaker_names={"Alex"},
         )
         self.assertIsNone(again)
-        self.assertTrue(self.chat._text_to_send(again))
+        self.assertEqual(self.chat._text_to_send(again), "")
 
     def test_long_reply_ends_on_a_sentence(self):
         sentence = "Rent went up and working people feel that bill every single week."
@@ -149,11 +148,11 @@ class SendAfterTypingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.chat = Chat(bot=None, db=None, settings_manager=None)
 
-    async def test_empty_reply_still_sends_a_sentence(self):
+    async def test_empty_reply_does_not_send_a_fallback(self):
         message = _Message()
         sent = await self.chat._try_send_reply(message, None, False)
-        self.assertIn(sent, FALLBACK_QUOTES)
-        self.assertEqual(message.channel.sent, [sent])
+        self.assertIsNone(sent)
+        self.assertEqual(message.channel.sent, [])
 
     async def test_reference_failure_still_sends_the_sentence(self):
         message = _Message(fail_reference=True)
