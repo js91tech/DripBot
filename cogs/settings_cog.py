@@ -9,13 +9,22 @@ from config.default_settings import (
     normalize_personality_preset,
 )
 from utils import sanitize_message
-from llm import generate_llm_response, parse_settings_command
+from llm import generate_image, generate_llm_response, parse_settings_command
+from people import (
+    build_image_prompt,
+    find_person,
+    is_nsfw_request,
+    load_profiles,
+)
+from people_clone import clone_user_from_message
+import io
 import json
 
 
 def _personality_choices():
     labels = {
         "hannah": "Hannah (Default — Chaotic Discord Energy)",
+        "panda": "Panda (Cloned Discord Friend)",
         "ultron": "Ultron (Sarcastic Smart-Ass)",
         "deadpool": "Deadpool (Chaotic 4th-Wall)",
         "jarvis": "J.A.R.V.I.S. (British Butler)",
@@ -199,7 +208,6 @@ class SettingsCog(commands.Cog):
     @app_commands.describe(prompt="Describe the image you want to generate")
     async def slash_image(self, interaction: discord.Interaction, prompt: str):
         await interaction.response.defer(thinking=True)
-        from llm import generate_image
 
         guild_id = interaction.guild.id if interaction.guild else 0
         settings = await self.settings_manager.get_settings(guild_id)
@@ -209,7 +217,6 @@ class SettingsCog(commands.Cog):
             image_url = await generate_image(prompt, model_name=image_model)
             if image_url:
                 import base64
-                import io
                 if image_url.startswith("data:image/"):
                     header, encoded = image_url.split(",", 1)
                     ext = header.split("/")[1].split(";")[0]
@@ -226,6 +233,89 @@ class SettingsCog(commands.Cog):
                 )
         except Exception as e:
             await interaction.followup.send(f"Image generation error: `{e}`", ephemeral=True)
+
+    async def person_autocomplete(self, interaction: discord.Interaction, current: str):
+        current_lower = (current or "").lower()
+        choices = []
+        for profile in load_profiles():
+            if current_lower in profile["name"].lower() or current_lower in profile["id"]:
+                choices.append(app_commands.Choice(name=profile["name"], value=profile["id"]))
+        return choices[:25]
+
+    @app_commands.command(name="imagine", description="Generate an image of a known person")
+    @app_commands.describe(person="Who to generate", prompt="What they should be doing")
+    @app_commands.autocomplete(person=person_autocomplete)
+    async def imagine(self, interaction: discord.Interaction, person: str, prompt: str = "a casual portrait"):
+        profile = find_person(person) or next(
+            (p for p in load_profiles() if p["id"] == person.lower()),
+            None,
+        )
+        if not profile:
+            await interaction.response.send_message("I don't have a reference for that person.", ephemeral=True)
+            return
+        if is_nsfw_request(prompt):
+            await interaction.response.send_message("Yeah no, I'm not generating that.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        settings = await self.settings_manager.get_settings(interaction.guild.id if interaction.guild else 0)
+        image_url = await generate_image(
+            build_image_prompt(profile, prompt),
+            model_name=settings.get("image_model", "zai-sidecar"),
+            reference_path=profile.get("image_path"),
+        )
+        if not image_url:
+            await interaction.followup.send("Couldn't generate that image right now.", ephemeral=True)
+            return
+        import base64
+        if image_url.startswith("data:image/"):
+            header, encoded = image_url.split(",", 1)
+            ext = header.split("/")[1].split(";")[0]
+            img_data = base64.b64decode(encoded)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(img_data), f"{profile['id']}.{ext}")
+            )
+        else:
+            await interaction.followup.send(image_url)
+
+    @group.command(name="clone", description="Clone a Discord user into a people profile from a message id")
+    @app_commands.describe(
+        message_id="Discord message id to identify the user",
+        name="Profile name (default: panda)",
+    )
+    async def clone_profile(self, interaction: discord.Interaction, message_id: str, name: str = "panda"):
+        if not message_id.isdigit():
+            await interaction.response.send_message("Message id must be a Discord snowflake number.", ephemeral=True)
+            return
+        profile_id = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in name.strip().lower()) or "panda"
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        result = await clone_user_from_message(
+            self.bot,
+            message_id,
+            profile_id=profile_id,
+            preferred_guild_id=interaction.guild.id if interaction.guild else None,
+        )
+        if not result.get("ok"):
+            await interaction.followup.send(result.get("error") or "Clone failed.", ephemeral=True)
+            return
+        author = result.get("author") or {}
+        style = result.get("style") or {}
+        prompt = result.get("personality_prompt")
+        if prompt and interaction.guild:
+            from config.default_settings import build_custom_personality_settings_update
+            update = build_custom_personality_settings_update(prompt)
+            if update:
+                update["personality_name"] = profile_id.title()
+                await self.settings_manager.update_settings(interaction.guild.id, update)
+        await interaction.followup.send(
+            (
+                f"Cloned **{author.get('display_name') or author.get('username')}** "
+                f"(`{author.get('id')}`) into people profile **{profile_id}**.\n"
+                f"Messages analyzed: {style.get('sample_count', 0)}. "
+                f"{style.get('summary') or ''}\n"
+                f"Ask `draw {profile_id}` or use `/imagine person:{profile_id.title()}`."
+            ),
+            ephemeral=True,
+        )
 
     # ==========================================
     # /botsettings imgmodel - Image model picker

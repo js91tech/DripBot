@@ -13,6 +13,7 @@ Drop this file in your project root, replacing the old llm.py.
 
 import asyncio
 import aiohttp
+import base64
 import hashlib
 import json
 import logging
@@ -406,7 +407,8 @@ class LLMHandler:
     # ── OpenRouter Image Generation (via modalities) ──
 
     async def generate_image_openrouter(self, prompt: str, model: str = "openai/gpt-4o",
-                                        size: str = "1024x1024") -> str:
+                                        size: str = "1024x1024",
+                                        reference_data_url: str = None) -> str:
         """
         Generate an image via OpenRouter using the modalities API.
         Returns a data:image URL or empty string on failure.
@@ -422,15 +424,24 @@ class LLMHandler:
             "X-Title": "Dripsletongue Bot",
         }
 
+        text = (
+            "Create an image of this subject, exactly as described. "
+            "Do not substitute a different person or character:\n"
+            f"{prompt}"
+        )
+        if reference_data_url:
+            user_content = [
+                {"type": "text", "text": text + "\nMatch the attached reference photo's face and likeness."},
+                {"type": "image_url", "image_url": {"url": reference_data_url}},
+            ]
+        else:
+            user_content = text
+
         body = {
             "model": model,
             "messages": [{
                 "role": "user",
-                "content": (
-                    "Create an image of this subject, exactly as described. "
-                    "Do not substitute a different person or character:\n"
-                    f"{prompt}"
-                ),
+                "content": user_content,
             }],
             "modalities": ["text", "image"],
             "temperature": 0.7,
@@ -631,7 +642,19 @@ def build_pollinations_url(prompt: str) -> str:
     )
 
 
-async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Optional[str]:
+def reference_image_data_url(image_path):
+    """Encode a local reference photo as a data URL for likeness-matched image gen."""
+    if not image_path or not os.path.exists(image_path):
+        return None
+    with open(image_path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    return f"data:{mime};base64,{encoded}"
+
+
+async def generate_image(prompt: str, model_name: str = "zai-sidecar",
+                         reference_path: str = None) -> Optional[str]:
     """
     Generate an image. Returns a data:image URL or a regular URL.
 
@@ -639,8 +662,21 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
       - "zai-sidecar"    → Z.ai sidecar (free, local)
       - "pollinations"   → Pollinations.ai (free, always works)
       - any other string → OpenRouter with modalities (paid, best quality)
+
+    When reference_path is set, prefer OpenRouter so the likeness can be matched.
     """
     logger.info(f"[IMG] generate_image called: model={model_name}, prompt=\"{prompt[:80]}\"")
+    reference_url = reference_image_data_url(reference_path)
+
+    if reference_url and _llm_handler.api_key:
+        ref_model = model_name if model_name not in {"zai-sidecar", "pollinations", ""} else "google/gemini-2.5-flash-image"
+        logger.info(f"[IMG] Trying OpenRouter likeness gen with model={ref_model}")
+        b64_or_url = await _llm_handler.generate_image_openrouter(
+            prompt, model=ref_model, reference_data_url=reference_url
+        )
+        if b64_or_url:
+            return b64_or_url
+        logger.warning("[IMG] Reference-photo OpenRouter gen failed; falling through")
 
     if model_name == "pollinations":
         # Pollinations.ai — always free, no API key needed
@@ -669,7 +705,9 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar") -> Option
     else:
         # OpenRouter with modalities (model_name is an actual LLM model ID)
         logger.info(f"[IMG] Trying OpenRouter image gen with model={model_name}")
-        b64_or_url = await _llm_handler.generate_image_openrouter(prompt, model=model_name)
+        b64_or_url = await _llm_handler.generate_image_openrouter(
+            prompt, model=model_name, reference_data_url=reference_url
+        )
         if b64_or_url:
             return b64_or_url
         logger.warning(f"[IMG] OpenRouter image gen ({model_name}) failed, falling back to Pollinations")
@@ -717,7 +755,7 @@ async def parse_settings_command(prompt: str):
         "- vision_enabled: boolean\n"
         "- web_search_enabled: boolean\n"
         "- image_model: string (\"zai-sidecar\", \"pollinations\", or a model ID)\n"
-        "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\", \"charlie_kirk\", \"donald_trump\", \"nicki_minaj\", \"dr_umar\")\n"
+        "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\", \"charlie_kirk\", \"donald_trump\", \"nicki_minaj\", \"dr_umar\", \"panda\")\n"
         "- response_chance: float (0.0 to 1.0)\n"
         "- gif_chance: float (0.0 to 1.0)\n"
         "- reaction_chance: float (0.0 to 1.0)\n"
@@ -736,6 +774,7 @@ async def parse_settings_command(prompt: str):
         "- \"switch personality to nicki minaj\" → {\"key\": \"personality\", \"value\": \"nicki_minaj\"}\n"
         "- \"switch personality to nikki\" → {\"key\": \"personality\", \"value\": \"nicki_minaj\"}\n"
         "- \"switch personality to dr umar\" → {\"key\": \"personality\", \"value\": \"dr_umar\"}\n"
+        "- \"switch personality to panda\" → {\"key\": \"personality\", \"value\": \"panda\"}\n"
     )
 
     result = await _llm_handler.chat(
