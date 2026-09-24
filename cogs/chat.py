@@ -28,7 +28,9 @@ from utils import (
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
 from people import (
     build_image_prompt,
+    favorites_from_settings,
     is_nsfw_request,
+    maybe_spice_with_emoji,
     people_prompt_block,
     profile_from_image_subject,
 )
@@ -47,6 +49,7 @@ RESPONSE_STYLE_PROMPT = (
     "No paragraphs, lists, or assistant voice."
 )
 SLOWMODE_ERROR_CODE = 20016
+DEFAULT_REACTION_EMOJIS = ["💀", "😭", "🔥", "💯", "🤣", "🙄", "👀", "🫡", "🤨"]
 
 
 class Chat(commands.Cog):
@@ -71,6 +74,68 @@ class Chat(commands.Cog):
 
     def _personality_prompt(self, settings):
         return settings.get("personality_prompt") or HANNAH_PROMPT
+
+    def _clone_favorites(self, settings):
+        return favorites_from_settings(settings)
+
+    def _reaction_emojis(self, settings):
+        emojis, _ = self._clone_favorites(settings)
+        unicode_or_custom = [e for e in emojis if e]
+        return unicode_or_custom or list(DEFAULT_REACTION_EMOJIS)
+
+    @staticmethod
+    def _reaction_payload(emoji):
+        text = str(emoji or "").strip()
+        if not text:
+            return None
+        if text.startswith("<"):
+            try:
+                return discord.PartialEmoji.from_str(text)
+            except Exception:
+                return None
+        return text
+
+    async def _maybe_react_favorite(self, message, settings, force=False):
+        emoji_options = self._reaction_emojis(settings)
+        if not emoji_options:
+            return False
+        if not force:
+            try:
+                chance = float(settings.get("reaction_chance", 0.05))
+            except (TypeError, ValueError):
+                chance = 0.05
+            if random.random() >= chance:
+                return False
+        payload = self._reaction_payload(random.choice(emoji_options))
+        if payload is None:
+            return False
+        try:
+            await message.add_reaction(payload)
+            return True
+        except discord.errors.HTTPException:
+            return False
+
+    async def _maybe_send_favorite_sticker(self, message, settings, force=False):
+        _, stickers = self._clone_favorites(settings)
+        if not stickers:
+            return False
+        try:
+            chance = float(settings.get("sticker_chance", 0.18))
+        except (TypeError, ValueError):
+            chance = 0.18
+        if not force and random.random() > chance:
+            return False
+        choice = random.choice(stickers)
+        sticker_id = choice.get("id") if isinstance(choice, dict) else choice
+        if not sticker_id:
+            return False
+        try:
+            sticker = await self.bot.fetch_sticker(int(sticker_id))
+            await message.channel.send(stickers=[sticker])
+            return True
+        except Exception as e:
+            print(f"[STICKER] Could not send favorite sticker: {e}")
+            return False
 
     def _is_fuzzy_duplicate(self, text, guild_id):
         text_words = set(text.lower().split())
@@ -890,17 +955,30 @@ class Chat(commands.Cog):
             if image_failed:
                 if await self._try_send_reply(message, "couldn't get that image out", False):
                     self.channel_cooldowns[channel_id] = time.time()
+                return
+            # Random favorite emoji / sticker without a full reply.
+            at_idle_goal = (
+                not talking_to_someone_else
+                and not self._recently_spoke(channel_id)
+                and self.channel_counters[channel_id] >= self.channel_message_goals[channel_id]
+            )
+            fav_emojis, _ = self._clone_favorites(settings)
+            if at_idle_goal and fav_emojis and random.random() < float(settings.get("reaction_chance", 0.05)):
+                await self._maybe_react_favorite(message, settings, force=True)
+            if at_idle_goal and random.random() < float(settings.get("sticker_chance", 0.18)) * 0.35:
+                if await self._maybe_send_favorite_sticker(message, settings, force=True):
+                    self.channel_cooldowns[channel_id] = time.time()
+                    self.channel_counters[channel_id] = 0
+                    self.channel_message_goals[channel_id] = random.randint(5, 12)
             return
 
         # Optional reaction — never replaces a real reply when she was addressed.
         if random.random() < float(settings.get("reaction_chance", 0.05)):
-            emoji_options = ["💀", "😭", "🔥", "💯", "🤣", "🙄", "👀", "🫡", "🤨"]
-            try:
-                await message.add_reaction(random.choice(emoji_options))
-            except discord.errors.HTTPException:
-                pass
+            await self._maybe_react_favorite(message, settings, force=True)
             if not direct and random.random() < 0.35:
                 # Occasional reaction-only for ambient chatter, not for @/replies.
+                if random.random() < 0.45:
+                    await self._maybe_send_favorite_sticker(message, settings, force=True)
                 self.channel_cooldowns[channel_id] = time.time()
                 self.channel_counters[channel_id] = 0
                 self.channel_message_goals[channel_id] = random.randint(5, 12)
@@ -950,6 +1028,20 @@ class Chat(commands.Cog):
                         f"\n\nNotes about {message.author.display_name}:\n{memory_str}\n"
                         "Reference casually only when it fits."
                     )
+                fav_emojis, fav_stickers = self._clone_favorites(settings)
+                if fav_emojis or fav_stickers:
+                    emoji_txt = " ".join(fav_emojis) if fav_emojis else "none listed"
+                    sticker_txt = ", ".join(
+                        (s.get("name") or s.get("id") or "")
+                        for s in fav_stickers
+                        if isinstance(s, dict)
+                    ) or "none listed"
+                    dynamic_prompt += (
+                        f"\n\nTHEIR FAVORITE REACTS: emojis {emoji_txt}. "
+                        f"stickers {sticker_txt}. "
+                        "Drop one of these emojis sometimes, including at random. "
+                        "Do not spam them every line."
+                    )
 
                 chat_history.insert(0, {
                     "role": "system",
@@ -989,9 +1081,14 @@ class Chat(commands.Cog):
             print(f"[{guild_id}] No sentence to send.")
             return
 
+        fav_emojis, _ = self._clone_favorites(settings)
+        final_content = maybe_spice_with_emoji(final_content, fav_emojis)
+
         try:
             async with message.channel.typing():
                 delivered = await self._try_send_reply(message, final_content, use_mention)
+                if delivered:
+                    await self._maybe_send_favorite_sticker(message, settings)
                 if delivered and want_gif and not delivered.startswith("http"):
                     search_words = [w for w in (message.content or "").lower().split() if len(w) > 3]
                     search_query = random.choice(search_words) if search_words else "lol"

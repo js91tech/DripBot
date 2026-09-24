@@ -155,6 +155,10 @@ def build_image_prompt(profile, user_text):
     )
 
 
+CLONE_LOOKBACK = 400
+FAVORITE_EMOJI_LIMIT = 8
+FAVORITE_STICKER_LIMIT = 6
+
 _SLANG_RE = re.compile(
     r"\b(ngl|fr|idk|idc|imo|imho|lowkey|highkey|rn|tbh|lol|lmao|lmfao|bruh|nah|yep|yeth|tf|ikr|smh|ong|bet|w|l)\b",
     re.I,
@@ -166,11 +170,84 @@ _EMOJI_RE = re.compile(
     "\U0001FA70-\U0001FAFF"
     "]+",
 )
+CUSTOM_EMOJI_RE = re.compile(r"<a?:\w{1,32}:\d+>")
+_UNICODE_EMOJI_RE = re.compile(
+    r"(?:[\U0001F1E6-\U0001F1FF]{2}"
+    r"|[\U0001F300-\U0001FAFF]"
+    r"|[\U00002700-\U000027BF]"
+    r"|[\U00002600-\U000026FF])"
+    r"\uFE0F?"
+)
 
 
-def analyze_message_style(messages):
+def extract_emojis_from_text(text):
+    """Return custom and unicode emojis found in a Discord message."""
+    if not text:
+        return []
+    found = CUSTOM_EMOJI_RE.findall(text)
+    found.extend(_UNICODE_EMOJI_RE.findall(text))
+    return found
+
+
+def rank_favorites(counter, limit):
+    return [item for item, _ in Counter(counter).most_common(limit) if item]
+
+
+def maybe_spice_with_emoji(text, emojis, chance=0.35, rng=None):
+    """Sometimes append a favorite emoji when the reply has none yet."""
+    import random as random_mod
+
+    if not text or not emojis:
+        return text
+    if CUSTOM_EMOJI_RE.search(text) or _UNICODE_EMOJI_RE.search(text) or _EMOJI_RE.search(text):
+        return text
+    picker = rng or random_mod
+    if picker.random() > chance:
+        return text
+    return f"{text} {picker.choice(list(emojis))}"
+
+
+def favorites_from_settings(settings, personality_name=None):
+    """Guild clone_favorites first, then the active people profile."""
+    settings = settings or {}
+    stored = settings.get("clone_favorites") or {}
+    emojis = list(stored.get("emojis") or [])
+    stickers = list(stored.get("stickers") or [])
+    if emojis or stickers:
+        return emojis, stickers
+    name = personality_name or settings.get("personality_name") or ""
+    preset = ""
+    personality = settings.get("personality") or {}
+    if isinstance(personality, dict):
+        preset = personality.get("preset") or ""
+    profile = find_person(name) or find_person(preset)
+    if not profile:
+        return [], []
+    return list(profile.get("favorite_emojis") or []), list(profile.get("favorite_stickers") or [])
+
+
+def analyze_message_style(messages, emoji_counts=None, sticker_counts=None):
     """Turn a list of message strings into a clone report + Hannah-style prompt notes."""
     texts = [str(m).strip() for m in messages if str(m).strip()]
+    extracted = Counter()
+    for t in texts:
+        extracted.update(extract_emojis_from_text(t))
+    if emoji_counts:
+        extracted.update(emoji_counts)
+    favorite_emojis = rank_favorites(extracted, FAVORITE_EMOJI_LIMIT)
+    favorite_stickers = []
+    if sticker_counts:
+        if isinstance(sticker_counts, dict) and sticker_counts and isinstance(next(iter(sticker_counts.values()), None), dict):
+            # {id: {id, name, count?}} ranked by optional count
+            ranked = sorted(
+                sticker_counts.values(),
+                key=lambda item: int(item.get("count") or 0),
+                reverse=True,
+            )
+            favorite_stickers = ranked[:FAVORITE_STICKER_LIMIT]
+        else:
+            favorite_stickers = list(sticker_counts)[:FAVORITE_STICKER_LIMIT]
+
     if not texts:
         return {
             "sample_count": 0,
@@ -182,6 +259,8 @@ def analyze_message_style(messages):
             "common_starters": [],
             "fragments": 0,
             "samples": [],
+            "favorite_emojis": favorite_emojis,
+            "favorite_stickers": favorite_stickers,
             "summary": "No messages available to analyze.",
         }
 
@@ -194,7 +273,7 @@ def analyze_message_style(messages):
         median = (lengths_sorted[mid - 1] + lengths_sorted[mid]) / 2
 
     lower_msgs = sum(1 for t in texts if t[:1].islower())
-    emoji_msgs = sum(1 for t in texts if _EMOJI_RE.search(t))
+    emoji_msgs = sum(1 for t in texts if extract_emojis_from_text(t))
     slang = Counter()
     starters = Counter()
     fragments = 0
@@ -206,6 +285,9 @@ def analyze_message_style(messages):
         if len(t) <= 18 or not t.endswith((".", "?", "!")):
             fragments += 1
 
+    sticker_bit = (
+        f" {len(favorite_stickers)} favorite sticker(s)." if favorite_stickers else ""
+    )
     report = {
         "sample_count": len(texts),
         "avg_chars": round(sum(lengths) / len(lengths), 1),
@@ -216,10 +298,13 @@ def analyze_message_style(messages):
         "common_starters": [w for w, _ in starters.most_common(8)],
         "fragments": fragments,
         "samples": texts[:40],
+        "favorite_emojis": favorite_emojis,
+        "favorite_stickers": favorite_stickers,
         "summary": (
             f"{len(texts)} messages, median {median:g} chars, "
             f"{round(100 * lower_msgs / len(texts))}% start lowercase, "
             f"{round(100 * emoji_msgs / len(texts))}% use emoji."
+            f"{sticker_bit}"
         ),
     }
     return report
@@ -235,6 +320,23 @@ def build_clone_personality_prompt(name, report, extra_notes=None):
     short = "Keep replies very short — fragments are normal." if median <= 40 else (
         "Keep replies short, one or two Discord lines, not a paragraph."
     )
+    fav_emojis = [str(e) for e in (report.get("favorite_emojis") or []) if e]
+    sticker_names = []
+    for sticker in report.get("favorite_stickers") or []:
+        if isinstance(sticker, dict) and sticker.get("name"):
+            sticker_names.append(sticker["name"])
+        elif sticker:
+            sticker_names.append(str(sticker))
+    emoji_line = (
+        f"- Use their favorite emojis the way they do, not every line: {', '.join(fav_emojis)}.\n"
+        if fav_emojis else
+        "- Use emoji only as often as they would. Do not invent a new emoji personality.\n"
+    )
+    sticker_line = (
+        f"- They send stickers like {', '.join(sticker_names)}. "
+        "A sticker may be sent separately; you do not have to mention it.\n"
+        if sticker_names else ""
+    )
     return (
         f"You are {name} — a real person in this Discord, not a bot or assistant.\n"
         "Your job is to match the observed texting rhythm, humor, bluntness, casual tone, "
@@ -246,6 +348,8 @@ def build_clone_personality_prompt(name, report, extra_notes=None):
         f"- {short}\n"
         f"- Common slang when it fits: {slang}.\n"
         f"- Common openers: {starters}.\n"
+        f"{emoji_line}"
+        f"{sticker_line}"
         "- Fragments ok. Casual spelling ok.\n"
         "- Do not sound like an assistant, therapist, poet, or formal writer.\n"
         "- Do not start with names, usernames, or @.\n"
