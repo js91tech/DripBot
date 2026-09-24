@@ -108,6 +108,26 @@ HANNAH_PROMPT = (
     "- Only join raunchy banter if the chat already went there; keep it joking, never graphic or unsafe.\n"
 )
 
+# Panda — cloned from Discord message 1552791353153421444 the same way Hannah was.
+# Voice details get refreshed by scripts/clone_from_message.py / /botsettings clone
+# once DISCORD_TOKEN can read that user's messages.
+PANDA_PROMPT = (
+    "You are Panda — a real person in this Discord, not a bot or assistant.\n"
+    "Your job is to match the observed texting rhythm, humor, bluntness, casual tone, "
+    "and group-chat energy as closely as possible.\n"
+    "Voice: casual Discord friend. React first. Not polished or assistant-like.\n"
+    "Style:\n"
+    "- One short Discord message. One or two tiny lines max.\n"
+    "- Fragments ok. Casual spelling ok.\n"
+    "- Do not start with names, usernames, or @.\n"
+    "- Never claim to be an ai/llm.\n"
+    "Behavior:\n"
+    "- Answer the latest person you are talking to only.\n"
+    "- Laugh first if something is funny; ask a short question if confused.\n"
+    "- Only join raunchy banter if the chat already went there; keep it joking, never graphic or unsafe.\n"
+    "CRITICAL RULE: NEVER include user names, display names, or @ symbols in your actual response text.\n"
+)
+
 def get_hannah_prompt(style: str = "default") -> str:
     """Return the active Hannah prompt, or the classic full prompt if style='classic'."""
     if str(style or '').strip().lower() in {'classic', 'legacy', 'full', 'original'}:
@@ -336,6 +356,11 @@ PERSONALITY_PRESETS = {
         "description": "Blunt chaotic Discord friend energy — short, reactive, funny",
         "prompt": HANNAH_PROMPT,
     },
+    "panda": {
+        "name": "Panda",
+        "description": "Cloned Discord friend from msg 1552791353153421444 — same people-dataset method as Hannah",
+        "prompt": PANDA_PROMPT,
+    },
 }
 
 PERSONALITY_ALIASES = {
@@ -381,6 +406,7 @@ PERSONALITY_ALIASES = {
     "classic_hannah": "hannah_classic",
     "hannah_legacy": "hannah_classic",
     "hanah": "hannah",
+    "panda": "panda",
 }
 
 

@@ -26,6 +26,12 @@ from utils import (
     world_context_line,
 )
 from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
+from people import (
+    build_image_prompt,
+    is_nsfw_request,
+    people_prompt_block,
+    profile_from_image_subject,
+)
 
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
@@ -775,28 +781,45 @@ class Chat(commands.Cog):
 
         # Image generation: keep mention gate for paid models.
         # Extract the visual subject only so "hannah draw a cat" does not
-        # become a portrait of Hannah.
+        # become a portrait of Hannah. "draw panda" / "draw hannah" use the
+        # people-dataset reference photo, same as the original Hannah clone.
         image_prompt = self._is_image_request(message.content, settings)
+        image_person = profile_from_image_subject(image_prompt) if image_prompt else None
         image_failed = False
         if image_prompt:
             skip_image = self._cooldown_active(channel_id, settings)
             if not skip_image:
                 image_model = settings.get("image_model", "zai-sidecar")
-                requires_mention = image_model != "pollinations"
+                requires_mention = image_model != "pollinations" and not image_person
                 direct, _, _ = self._is_direct_address(message, settings)
                 if requires_mention and not direct:
                     image_prompt = None
+                    image_person = None
                 else:
                     print(f"[IMAGE] Generating image with model={image_model}, prompt=\"{image_prompt[:80]}\"")
                     try:
                         async with message.channel.typing():
-                            image_url = await generate_image(image_prompt, model_name=image_model)
+                            if image_person and is_nsfw_request(message.content):
+                                if await self._try_send_reply(message, "yeah no i'm not generating that", False):
+                                    self.channel_cooldowns[channel_id] = time.time()
+                                    return
+                                image_failed = True
+                                image_url = None
+                            elif image_person:
+                                image_url = await generate_image(
+                                    build_image_prompt(image_person, image_prompt),
+                                    model_name=image_model,
+                                    reference_path=image_person.get("image_path"),
+                                )
+                            else:
+                                image_url = await generate_image(image_prompt, model_name=image_model)
                         if image_url:
+                            filename = f"{image_person['id']}.png" if image_person else "image.png"
                             if image_url.startswith("data:image/"):
                                 header, encoded = image_url.split(",", 1)
                                 ext = header.split("/")[1].split(";")[0]
                                 img_data = base64.b64decode(encoded)
-                                img_file = discord.File(io.BytesIO(img_data), f"image.{ext}")
+                                img_file = discord.File(io.BytesIO(img_data), f"{filename.rsplit('.', 1)[0]}.{ext}")
                                 await message.channel.send(file=img_file, reference=message)
                             else:
                                 await message.channel.send(image_url, reference=message)
@@ -910,6 +933,9 @@ class Chat(commands.Cog):
                     consolidated = await self.db.get_consolidated_memory(guild_id)
 
                 dynamic_prompt = self._personality_prompt(settings)
+                people_block = people_prompt_block()
+                if people_block:
+                    dynamic_prompt += people_block
                 dynamic_prompt += f"\n\n{RESPONSE_STYLE_PROMPT}"
                 dynamic_prompt += f"\n{addressee_instruction(message.author.display_name)}"
                 dynamic_prompt += f"\n{await world_context_line()}"

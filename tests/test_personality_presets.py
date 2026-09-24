@@ -65,8 +65,12 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertNotIn("folding-table", prompt)
         self.assertNotIn("debate", prompt)
 
+    def test_panda_aliases(self):
+        self.assertEqual(normalize_personality_preset("panda"), "panda")
+        self.assertEqual(normalize_personality_preset("Panda"), "panda")
+
     def test_new_presets_are_selectable(self):
-        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar"):
+        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
             preset = PERSONALITY_PRESETS[preset_id]
             self.assertTrue(preset["name"])
@@ -94,6 +98,11 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(umar["personality_name"], "Dr. Umar")
         self.assertEqual(umar["personality"]["preset"], "dr_umar")
         self.assertEqual(umar["personality_prompt"], PERSONALITY_PRESETS["dr_umar"]["prompt"])
+
+        panda = build_personality_settings_update("panda")
+        self.assertEqual(panda["personality_name"], "Panda")
+        self.assertEqual(panda["personality"]["preset"], "panda")
+        self.assertEqual(panda["personality_prompt"], PERSONALITY_PRESETS["panda"]["prompt"])
 
 
 if __name__ == "__main__":
