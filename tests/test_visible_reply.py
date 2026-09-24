@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import discord
 
-from cogs.chat import Chat
+from cogs.chat import DEFAULT_REACTION_EMOJIS, Chat
 from llm import (
     content_to_visible_text,
     flatten_text_content,
@@ -299,6 +299,8 @@ class _Settings:
             "trigger_on_reply": True,
             "reaction_chance": 0,
             "gif_chance": 0,
+            "sticker_chance": 0,
+            "clone_favorites": {"emojis": [], "stickers": []},
             "random_mention_chance": 0,
             "cooldown_seconds": 5,
             "personality_prompt": "You are Hannah.",
@@ -342,6 +344,60 @@ class OnMessageSentenceTests(unittest.IsolatedAsyncioTestCase):
         channel = await self._run(None)
         self.assertEqual(channel.sent, [])
         self.assertNotIn("typing", channel.log)
+
+
+class FavoriteReactTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.chat = Chat(bot=None, db=None, settings_manager=None)
+
+    def test_reaction_emojis_prefer_clone_favorites(self):
+        self.assertEqual(
+            self.chat._reaction_emojis({"clone_favorites": {"emojis": ["😭", "<:panda:1>"]}}),
+            ["😭", "<:panda:1>"],
+        )
+        self.assertEqual(self.chat._reaction_emojis({}), list(DEFAULT_REACTION_EMOJIS))
+
+    async def test_sends_favorite_sticker(self):
+        fetched = []
+
+        class _Bot:
+            async def fetch_sticker(self, sid):
+                fetched.append(sid)
+                return f"sticker-{sid}"
+
+        class _Channel:
+            def __init__(self):
+                self.sent = []
+
+            async def send(self, content=None, **kwargs):
+                self.sent.append(kwargs)
+                return kwargs
+
+        chat = Chat(_Bot(), None, None)
+        message = type("Msg", (), {"channel": _Channel()})()
+        settings = {
+            "clone_favorites": {"emojis": [], "stickers": [{"id": "123", "name": "wave"}]},
+            "sticker_chance": 1.0,
+        }
+        sent = await chat._maybe_send_favorite_sticker(message, settings, force=True)
+        self.assertTrue(sent)
+        self.assertEqual(fetched, [123])
+        self.assertEqual(message.channel.sent, [{"stickers": ["sticker-123"]}])
+
+    async def test_reacts_with_favorite_emoji(self):
+        reacted = []
+
+        class _Message:
+            async def add_reaction(self, emoji):
+                reacted.append(str(emoji))
+
+        sent = await self.chat._maybe_react_favorite(
+            _Message(),
+            {"clone_favorites": {"emojis": ["😭"]}},
+            force=True,
+        )
+        self.assertTrue(sent)
+        self.assertEqual(reacted, ["😭"])
 
 
 if __name__ == "__main__":

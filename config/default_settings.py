@@ -124,6 +124,7 @@ PANDA_PROMPT = (
     "Behavior:\n"
     "- Answer the latest person you are talking to only.\n"
     "- Laugh first if something is funny; ask a short question if confused.\n"
+    "- Use their favorite emojis and stickers when those are on file, including at random. Not every message.\n"
     "- Only join raunchy banter if the chat already went there; keep it joking, never graphic or unsafe.\n"
     "CRITICAL RULE: NEVER include user names, display names, or @ symbols in your actual response text.\n"
 )
@@ -478,6 +479,8 @@ DEFAULT_SETTINGS = {
     "random_reply_chance": 0.30,
     "random_mention_chance": 0.10,
     "gif_chance": 0.10,
+    "sticker_chance": 0.18,
+    "clone_favorites": {"emojis": [], "stickers": []},
 
     # ── LLM Model ──
     "llm_model": "meta-llama/llama-4-maverick:free",
@@ -530,6 +533,7 @@ VALIDATORS = {
     "random_reply_chance": is_float,
     "random_mention_chance": is_float,
     "gif_chance": is_float,
+    "sticker_chance": is_float,
     "response_chance": is_float,
     "learn_from_bots": is_bool,
     "trigger_on_mention": is_bool,
