@@ -33,6 +33,54 @@ from people import (
     profile_from_image_subject,
 )
 
+DR_UMAR_PRESET_ID = "dr_umar"
+DR_UMAR_AVATAR_VISION_PROMPT = (
+    "Describe this Discord profile picture in 1-2 factual sentences. "
+    "If it shows a real human face or body, mention visible hair, skin tone, "
+    "and apparent race or ethnicity from features you can actually see. "
+    "If features look mixed or you are unsure, say so. "
+    "If it is a cartoon, anime, logo, animal, meme, celebrity photo, or has no clear face, "
+    "say that and do not invent a race. Do not guess a name or identity."
+)
+AVATAR_APPEARANCE_CACHE_LIMIT = 200
+
+
+def is_dr_umar_personality(settings):
+    """True when the active guild personality is the Dr. Umar preset."""
+    if not settings:
+        return False
+    personality = settings.get("personality") or {}
+    if isinstance(personality, str):
+        return personality == DR_UMAR_PRESET_ID
+    if isinstance(personality, dict) and personality.get("preset") == DR_UMAR_PRESET_ID:
+        return True
+    return settings.get("personality_name") == "Dr. Umar"
+
+
+def author_custom_avatar_url(author, size=256):
+    """Return (url, cache_key) for a custom Discord avatar, or (None, None)."""
+    if author is None:
+        return None, None
+    user_avatar = getattr(author, "avatar", None)
+    guild_avatar = getattr(author, "guild_avatar", None)
+    if user_avatar is None and guild_avatar is None:
+        return None, None
+    display = getattr(author, "display_avatar", None) or user_avatar or guild_avatar
+    cache_token = getattr(display, "key", None) or getattr(display, "url", "")
+    cache_key = f"{getattr(author, 'id', 'unknown')}:{cache_token}"
+    url = ""
+    replace = getattr(display, "replace", None)
+    if callable(replace):
+        try:
+            url = str(replace(size=size).url)
+        except Exception:
+            url = ""
+    if not url:
+        url = str(getattr(display, "url", "") or "")
+    if not url:
+        return None, None
+    return url, cache_key
+
 FUZZY_DEDUP_THRESHOLD = 0.70
 FUZZY_DEDUP_WINDOW = 8
 MIN_REPLY_COOLDOWN_SECONDS = 5
@@ -60,6 +108,7 @@ class Chat(commands.Cog):
         self.last_bot_engagement = {}
         self.recent_timestamps = {}
         self.channel_message_goals = {}
+        self._avatar_appearance_cache = {}
 
     async def cog_load(self):
         self.proactive_loop.start()
@@ -285,6 +334,37 @@ class Chat(commands.Cog):
             print(f"[VISION] Error analyzing image: {e}")
         return None
 
+    def _remember_avatar_appearance(self, cache_key, description):
+        self._avatar_appearance_cache[cache_key] = description
+        extra = len(self._avatar_appearance_cache) - AVATAR_APPEARANCE_CACHE_LIMIT
+        if extra <= 0:
+            return
+        for stale_key in list(self._avatar_appearance_cache)[:extra]:
+            self._avatar_appearance_cache.pop(stale_key, None)
+
+    async def _get_author_appearance_context(self, message, settings):
+        """Dr. Umar only: describe the speaker's custom profile picture when vision is on."""
+        if not is_dr_umar_personality(settings):
+            return None
+        if not settings.get("vision_enabled", True):
+            return None
+        url, cache_key = author_custom_avatar_url(getattr(message, "author", None))
+        if not url:
+            return None
+        cached = self._avatar_appearance_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            description = await analyze_image_vision(url, prompt=DR_UMAR_AVATAR_VISION_PROMPT)
+            if description:
+                description = description.strip()
+                self._remember_avatar_appearance(cache_key, description)
+                print(f"[VISION] Avatar appearance: {description[:80]}...")
+                return description
+        except Exception as e:
+            print(f"[VISION] Error analyzing avatar: {e}")
+        return None
+
     async def _enrich_with_search(self, message, settings):
         if not settings.get("web_search_enabled", True):
             return None
@@ -312,7 +392,9 @@ class Chat(commands.Cog):
             print(f"[SEARCH] Error: {e}")
         return None
 
-    async def _build_chat_history(self, message, image_description=None, web_context=None):
+    async def _build_chat_history(
+        self, message, image_description=None, web_context=None, avatar_description=None
+    ):
         """Recent channel context + the Discord reply thread, without dumping 100 msgs."""
         chat_history = []
         speaker_names = {message.author.display_name}
@@ -365,6 +447,8 @@ class Chat(commands.Cog):
         trigger_text = self._speaker_line(message, message.guild)
         if image_description:
             trigger_text += f" [The user sent an image: {image_description}]"
+        if avatar_description:
+            trigger_text += f" [Speaker profile picture appearance: {avatar_description}]"
         if web_context:
             trigger_text += f" {web_context}"
         trigger_payload = [{"type": "text", "text": trigger_text}]
@@ -911,8 +995,11 @@ class Chat(commands.Cog):
         use_mention = False
         want_gif = False
         try:
-                image_description = await self._get_image_context(message, settings)
-                web_context = await self._enrich_with_search(message, settings)
+                image_description, avatar_description, web_context = await asyncio.gather(
+                    self._get_image_context(message, settings),
+                    self._get_author_appearance_context(message, settings),
+                    self._enrich_with_search(message, settings),
+                )
 
                 # GIF is an add-on chance after a text reply, not a replacement.
                 want_gif = random.random() < float(settings.get("gif_chance", 0.10))
@@ -923,7 +1010,7 @@ class Chat(commands.Cog):
                 )
 
                 chat_history, speaker_names = await self._build_chat_history(
-                    message, image_description, web_context
+                    message, image_description, web_context, avatar_description
                 )
 
                 user_memories = []

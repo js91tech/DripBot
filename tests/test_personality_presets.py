@@ -69,6 +69,19 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(normalize_personality_preset("panda"), "panda")
         self.assertEqual(normalize_personality_preset("Panda"), "panda")
 
+    def test_dr_umar_is_unhinged_and_reads_pfps(self):
+        preset = PERSONALITY_PRESETS["dr_umar"]
+        prompt = preset["prompt"].lower()
+        self.assertIn("unhinged", preset["description"].lower())
+        self.assertIn("unhinged", prompt)
+        self.assertIn("let me tell you something", prompt)
+        self.assertIn("you have been programmed", prompt)
+        self.assertIn("profile-picture", prompt)
+        self.assertIn("apparent race", prompt)
+        self.assertIn("no slurs", prompt)
+        self.assertNotIn("not a man looking for an argument", prompt)
+        self.assertNotIn("do not rant for sport", prompt)
+
     def test_new_presets_are_selectable(self):
         for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
