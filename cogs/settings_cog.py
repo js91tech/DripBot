@@ -11,6 +11,7 @@ from config.default_settings import (
 from utils import sanitize_message
 from llm import generate_image, generate_llm_response, parse_settings_command
 from people import (
+    CLONE_LOOKBACK,
     build_image_prompt,
     find_person,
     is_nsfw_request,
@@ -300,18 +301,34 @@ class SettingsCog(commands.Cog):
         author = result.get("author") or {}
         style = result.get("style") or {}
         prompt = result.get("personality_prompt")
-        if prompt and interaction.guild:
+        if interaction.guild:
             from config.default_settings import build_custom_personality_settings_update
-            update = build_custom_personality_settings_update(prompt)
-            if update:
+            update = {}
+            if prompt:
+                update = build_custom_personality_settings_update(prompt) or {}
                 update["personality_name"] = profile_id.title()
+            update["clone_favorites"] = {
+                "emojis": result.get("favorite_emojis") or style.get("favorite_emojis") or [],
+                "stickers": result.get("favorite_stickers") or style.get("favorite_stickers") or [],
+            }
+            if update:
                 await self.settings_manager.update_settings(interaction.guild.id, update)
+        fav_e = result.get("favorite_emojis") or style.get("favorite_emojis") or []
+        fav_s = result.get("favorite_stickers") or style.get("favorite_stickers") or []
+        sticker_names = ", ".join(
+            (s.get("name") or s.get("id") or "")
+            for s in fav_s
+            if isinstance(s, dict)
+        )
         await interaction.followup.send(
             (
                 f"Cloned **{author.get('display_name') or author.get('username')}** "
                 f"(`{author.get('id')}`) into people profile **{profile_id}**.\n"
+                f"Looked at the last 400 messages per channel. "
                 f"Messages analyzed: {style.get('sample_count', 0)}. "
                 f"{style.get('summary') or ''}\n"
+                f"Favorite emojis: {' '.join(fav_e) or 'none yet'}. "
+                f"Favorite stickers: {sticker_names or 'none yet'}.\n"
                 f"Ask `draw {profile_id}` or use `/imagine person:{profile_id.title()}`."
             ),
             ephemeral=True,
@@ -453,10 +470,10 @@ class SettingsCog(commands.Cog):
             return
         await interaction.response.defer(thinking=True)
         user_msgs = []
-        async for msg in interaction.channel.history(limit=500):
+        async for msg in interaction.channel.history(limit=CLONE_LOOKBACK):
             if msg.author.id == user.id and not msg.content.startswith("/") and msg.content.strip():
                 user_msgs.insert(0, msg.content)
-                if len(user_msgs) >= 30:
+                if len(user_msgs) >= 80:
                     break
         if len(user_msgs) < 5:
             await interaction.followup.send(
@@ -487,10 +504,10 @@ class SettingsCog(commands.Cog):
             return
         await interaction.response.defer(thinking=True)
         user_msgs = []
-        async for msg in interaction.channel.history(limit=500):
+        async for msg in interaction.channel.history(limit=CLONE_LOOKBACK):
             if msg.author.id == user.id and not msg.content.startswith("/") and msg.content.strip():
                 user_msgs.insert(0, msg.content)
-                if len(user_msgs) >= 40:
+                if len(user_msgs) >= 80:
                     break
         if len(user_msgs) < 5:
             await interaction.followup.send(

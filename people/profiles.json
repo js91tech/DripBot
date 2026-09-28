@@ -18,11 +18,14 @@
       "Source message id 1552791353153421444 (Discord snowflake, 2026-09-24 21:18:28 UTC).",
       "A reference photo is on file when people/panda.jpg exists. If someone asks for a picture, drawing, photo, or generated image of Panda, the bot should generate one that looks like them."
     ],
+    "favorite_emojis": [],
+    "favorite_stickers": [],
     "appearance": "Use the reference photo. Keep their face, hair, and likeness. Do not invent a different person or draw an animal panda unless the user explicitly asks for that joke.",
     "source": {
       "message_id": "1552791353153421444",
       "guild_id": "1388136234827649116",
       "message_sent_at": "2026-09-24T21:18:28.060Z",
+      "lookback": 400,
       "method": "hannah-people-dataset"
     }
   }
