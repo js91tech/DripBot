@@ -56,6 +56,10 @@ class PersonalityPresetTests(unittest.TestCase):
         ):
             self.assertEqual(normalize_personality_preset(alias), "dr_umar")
 
+    def test_cripmac_aliases(self):
+        for alias in ("cripmac", "CripMac", "crip mac", "crip-mac", "crip_mac"):
+            self.assertEqual(normalize_personality_preset(alias), "cripmac")
+
     def test_charlie_kirk_is_practical(self):
         prompt = PERSONALITY_PRESETS["charlie_kirk"]["prompt"].lower()
         self.assertIn("practical", prompt)
@@ -83,7 +87,7 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertNotIn("do not rant for sport", prompt)
 
     def test_new_presets_are_selectable(self):
-        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda"):
+        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "cripmac", "panda"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
             preset = PERSONALITY_PRESETS[preset_id]
             self.assertTrue(preset["name"])
@@ -111,6 +115,11 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(umar["personality_name"], "Dr. Umar")
         self.assertEqual(umar["personality"]["preset"], "dr_umar")
         self.assertEqual(umar["personality_prompt"], PERSONALITY_PRESETS["dr_umar"]["prompt"])
+
+        cripmac = build_personality_settings_update("crip mac")
+        self.assertEqual(cripmac["personality_name"], "CripMac")
+        self.assertEqual(cripmac["personality"]["preset"], "cripmac")
+        self.assertEqual(cripmac["personality_prompt"], PERSONALITY_PRESETS["cripmac"]["prompt"])
 
         panda = build_personality_settings_update("panda")
         self.assertEqual(panda["personality_name"], "Panda")
