@@ -38,6 +38,7 @@ def _personality_choices():
         "donald_trump": "Donald Trump (America First)",
         "nicki_minaj": "Nicki Minaj (Queens Texting Voice)",
         "dr_umar": "Dr. Umar (Unhinged Lecturer)",
+        "crip_mac": "Crip Mac (Keep It Five)",
     }
     return [
         app_commands.Choice(name=labels.get(preset_id, preset["name"]), value=preset_id)
