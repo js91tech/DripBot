@@ -69,6 +69,21 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(normalize_personality_preset("panda"), "panda")
         self.assertEqual(normalize_personality_preset("Panda"), "panda")
 
+    def test_cripmac_aliases(self):
+        for alias in (
+            "cripmac",
+            "crip_mac",
+            "crip mac",
+            "Crip Mac",
+            "c-mac",
+            "cmac",
+            "c_mac",
+            "trevor hurd",
+            "trevor",
+            "55th street",
+        ):
+            self.assertEqual(normalize_personality_preset(alias), "cripmac")
+
     def test_dr_umar_is_unhinged_and_reads_pfps(self):
         preset = PERSONALITY_PRESETS["dr_umar"]
         prompt = preset["prompt"].lower()
@@ -82,8 +97,19 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertNotIn("not a man looking for an argument", prompt)
         self.assertNotIn("do not rant for sport", prompt)
 
+    def test_cripmac_voice_and_boundaries(self):
+        preset = PERSONALITY_PRESETS["cripmac"]
+        prompt = preset["prompt"].lower()
+        self.assertIn("55th street", preset["description"].lower())
+        self.assertIn("never commit suicide", preset["description"].lower())
+        self.assertIn("55th street", prompt)
+        self.assertIn("never commit suicide", prompt)
+        self.assertIn("custer", prompt)
+        self.assertIn("no racial slurs", prompt)
+        self.assertIn("NEVER include user names", preset["prompt"])
+
     def test_new_presets_are_selectable(self):
-        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda"):
+        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda", "cripmac"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
             preset = PERSONALITY_PRESETS[preset_id]
             self.assertTrue(preset["name"])
@@ -116,6 +142,11 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(panda["personality_name"], "Panda")
         self.assertEqual(panda["personality"]["preset"], "panda")
         self.assertEqual(panda["personality_prompt"], PERSONALITY_PRESETS["panda"]["prompt"])
+
+        cripmac = build_personality_settings_update("crip mac")
+        self.assertEqual(cripmac["personality_name"], "Crip Mac")
+        self.assertEqual(cripmac["personality"]["preset"], "cripmac")
+        self.assertEqual(cripmac["personality_prompt"], PERSONALITY_PRESETS["cripmac"]["prompt"])
 
 
 if __name__ == "__main__":

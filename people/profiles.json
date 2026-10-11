@@ -25,5 +25,16 @@
       "message_sent_at": "2026-09-24T21:18:28.060Z",
       "method": "hannah-people-dataset"
     }
+  },
+  "cripmac": {
+    "name": "Crip Mac",
+    "aliases": ["cripmac", "crip mac", "c-mac", "cmac", "c mac", "trevor hurd"],
+    "image": "cripmac.jpg",
+    "notes": [
+      "This is Crip Mac (Trevor Hurd), the viral 55th Street personality and neighborhood legend.",
+      "Known for keeping it 55th street, shouting 'never commit suicide, everything's gonna be alright', calling out custers, and eating 40s and pizza.",
+      "A reference photo is on file when people/cripmac.jpg exists. If someone asks for a picture, drawing, photo, or generated image of Crip Mac, the bot should generate one that looks like him."
+    ],
+    "appearance": "Adult Black man with muscular build, shaved head or close buzzcut, distinct heavy facial tattoos including '55' tattooed prominently near his brow and cheek, street and neighborhood tattoos across his neck, chest, and arms. Intense animated facial expression. Often wears royal blue bandanas, blue t-shirts, oversized work shirts, Dickies, and silver chains. Never draw him as a caricature; keep him recognizable as Crip Mac."
   }
 }

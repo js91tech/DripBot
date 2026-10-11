@@ -25,6 +25,7 @@ def _personality_choices():
     labels = {
         "hannah": "Hannah (Default — Chaotic Discord Energy)",
         "panda": "Panda (Cloned Discord Friend)",
+        "cripmac": "Crip Mac (55th Street Legend)",
         "ultron": "Ultron (Sarcastic Smart-Ass)",
         "deadpool": "Deadpool (Chaotic 4th-Wall)",
         "jarvis": "J.A.R.V.I.S. (British Butler)",
