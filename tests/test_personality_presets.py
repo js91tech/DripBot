@@ -65,6 +65,30 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertNotIn("folding-table", prompt)
         self.assertNotIn("debate", prompt)
 
+    def test_crip_mac_aliases(self):
+        for alias in (
+            "crip_mac",
+            "crip mac",
+            "Crip Mac",
+            "cripmac",
+            "crip-mac",
+            "cripmac55",
+            "55th street",
+            "55thstreet",
+        ):
+            self.assertEqual(normalize_personality_preset(alias), "crip_mac")
+
+    def test_crip_mac_is_the_55th_street_voice(self):
+        preset = PERSONALITY_PRESETS["crip_mac"]
+        prompt = preset["prompt"].lower()
+        self.assertEqual(preset["name"], "Crip Mac")
+        self.assertIn("55th", preset["description"].lower())
+        self.assertIn("cuh", prompt)
+        self.assertIn("you 5 me", prompt)
+        self.assertIn("song lyrics", prompt)
+        self.assertIn("no crime how-to", prompt)
+        self.assertIn("never involve minors", prompt)
+
     def test_panda_aliases(self):
         self.assertEqual(normalize_personality_preset("panda"), "panda")
         self.assertEqual(normalize_personality_preset("Panda"), "panda")
@@ -83,7 +107,11 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertNotIn("do not rant for sport", prompt)
 
     def test_new_presets_are_selectable(self):
-        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "panda"):
+        # Discord rejects a slash option with more than 25 choices and then
+        # fails to sync every command. /botsettings personality uses one choice
+        # per preset.
+        self.assertLessEqual(len(PERSONALITY_PRESETS), 25)
+        for preset_id in ("charlie_kirk", "donald_trump", "nicki_minaj", "dr_umar", "crip_mac", "panda"):
             self.assertIn(preset_id, PERSONALITY_PRESETS)
             preset = PERSONALITY_PRESETS[preset_id]
             self.assertTrue(preset["name"])
@@ -116,6 +144,11 @@ class PersonalityPresetTests(unittest.TestCase):
         self.assertEqual(panda["personality_name"], "Panda")
         self.assertEqual(panda["personality"]["preset"], "panda")
         self.assertEqual(panda["personality_prompt"], PERSONALITY_PRESETS["panda"]["prompt"])
+
+        mac = build_personality_settings_update("cripmac")
+        self.assertEqual(mac["personality_name"], "Crip Mac")
+        self.assertEqual(mac["personality"]["preset"], "crip_mac")
+        self.assertEqual(mac["personality_prompt"], PERSONALITY_PRESETS["crip_mac"]["prompt"])
 
 
 if __name__ == "__main__":

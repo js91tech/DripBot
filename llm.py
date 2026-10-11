@@ -755,7 +755,7 @@ async def parse_settings_command(prompt: str):
         "- vision_enabled: boolean\n"
         "- web_search_enabled: boolean\n"
         "- image_model: string (\"zai-sidecar\", \"pollinations\", or a model ID)\n"
-        "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\", \"charlie_kirk\", \"donald_trump\", \"nicki_minaj\", \"dr_umar\", \"panda\")\n"
+        "- personality: string (preset ID/name, e.g. \"ultron\", \"deadpool\", \"tony_stark\", \"charlie_kirk\", \"donald_trump\", \"nicki_minaj\", \"dr_umar\", \"crip_mac\", \"panda\")\n"
         "- response_chance: float (0.0 to 1.0)\n"
         "- gif_chance: float (0.0 to 1.0)\n"
         "- reaction_chance: float (0.0 to 1.0)\n"
@@ -774,6 +774,8 @@ async def parse_settings_command(prompt: str):
         "- \"switch personality to nicki minaj\" → {\"key\": \"personality\", \"value\": \"nicki_minaj\"}\n"
         "- \"switch personality to nikki\" → {\"key\": \"personality\", \"value\": \"nicki_minaj\"}\n"
         "- \"switch personality to dr umar\" → {\"key\": \"personality\", \"value\": \"dr_umar\"}\n"
+        "- \"switch personality to crip mac\" → {\"key\": \"personality\", \"value\": \"crip_mac\"}\n"
+        "- \"switch personality to cripmac\" → {\"key\": \"personality\", \"value\": \"crip_mac\"}\n"
         "- \"switch personality to panda\" → {\"key\": \"personality\", \"value\": \"panda\"}\n"
     )
 
