@@ -101,9 +101,15 @@ async def world_context_line():
     )
 
 
+def tenor_search_slug(query):
+    """Turn a GIF search into the hyphenated path Tenor uses."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(query or "").strip().lower()).strip("-")
+    return slug or "lol"
+
+
 async def search_gif(query):
     """Searches Tenor directly for a random GIF without needing an API key."""
-    url = f"https://tenor.com/search/{query}-gifs"
+    url = f"https://tenor.com/search/{tenor_search_slug(query)}-gifs"
     try:
         async with aiohttp.ClientSession() as session:
             # We add headers so Tenor thinks it's a normal web browser

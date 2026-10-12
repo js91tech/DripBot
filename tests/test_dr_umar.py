@@ -3,10 +3,15 @@ from unittest.mock import patch
 
 from cogs.chat import (
     AVATAR_APPEARANCE_CACHE_LIMIT,
+    CRIP_MAC_GIF_CHANCE,
+    CRIP_MAC_GIF_QUERIES,
     Chat,
     author_custom_avatar_url,
+    crip_mac_gif_query,
+    is_crip_mac_personality,
     is_dr_umar_personality,
 )
+from utils import tenor_search_slug
 
 
 class _Asset:
@@ -29,6 +34,32 @@ class DrUmarPersonalityGateTests(unittest.TestCase):
         self.assertFalse(is_dr_umar_personality(None))
         self.assertFalse(is_dr_umar_personality({"personality": {"preset": "hannah"}}))
         self.assertFalse(is_dr_umar_personality({"personality_name": "Hannah"}))
+
+
+class CripMacGifTests(unittest.TestCase):
+    def test_personality_gate(self):
+        self.assertTrue(is_crip_mac_personality({"personality": {"preset": "crip_mac"}}))
+        self.assertTrue(is_crip_mac_personality({"personality": "cripmac"}))
+        self.assertTrue(is_crip_mac_personality({"personality_name": "Crip Mac"}))
+        self.assertFalse(is_crip_mac_personality({"personality": {"preset": "hannah"}}))
+        self.assertFalse(is_crip_mac_personality(None))
+
+    def test_gif_is_sometimes_and_always_a_crip_mac_search(self):
+        settings = {"personality": {"preset": "crip_mac"}}
+        self.assertIsNone(crip_mac_gif_query(settings, roll=CRIP_MAC_GIF_CHANCE, pick=0))
+        self.assertIsNone(crip_mac_gif_query(settings, roll=0.99, pick=0))
+        for pick in range(len(CRIP_MAC_GIF_QUERIES)):
+            query = crip_mac_gif_query(settings, roll=0.0, pick=pick)
+            self.assertIn(query, CRIP_MAC_GIF_QUERIES)
+            self.assertIn("crip", query)
+        self.assertIsNone(
+            crip_mac_gif_query({"personality": {"preset": "hannah"}}, roll=0.0, pick=0)
+        )
+
+    def test_tenor_slug_keeps_crip_mac_searchable(self):
+        self.assertEqual(tenor_search_slug("Crip Mac"), "crip-mac")
+        self.assertEqual(tenor_search_slug("55th street crip mac"), "55th-street-crip-mac")
+        self.assertEqual(tenor_search_slug("lol"), "lol")
 
 
 class AvatarUrlTests(unittest.TestCase):

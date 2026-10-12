@@ -83,10 +83,15 @@ class PersonalityPresetTests(unittest.TestCase):
         prompt = preset["prompt"].lower()
         self.assertEqual(preset["name"], "Crip Mac")
         self.assertIn("55th", preset["description"].lower())
+        self.assertIn("hood", prompt)
+        self.assertIn("finna", prompt)
+        self.assertIn("ain't", prompt)
+        self.assertIn("ion even", prompt)
         self.assertIn("cuh", prompt)
         self.assertIn("you 5 me", prompt)
         self.assertIn("song lyrics", prompt)
         self.assertIn("no crime how-to", prompt)
+        self.assertIn("no slurs", prompt)
         self.assertIn("never involve minors", prompt)
 
     def test_panda_aliases(self):
