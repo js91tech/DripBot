@@ -34,6 +34,15 @@ from people import (
 )
 
 DR_UMAR_PRESET_ID = "dr_umar"
+CRIP_MAC_PRESET_ID = "crip_mac"
+CRIP_MAC_GIF_CHANCE = 0.25
+CRIP_MAC_GIF_QUERIES = (
+    "crip mac",
+    "cripmac",
+    "crip mac funny",
+    "crip mac reaction",
+    "55th street crip mac",
+)
 DR_UMAR_AVATAR_VISION_PROMPT = (
     "Describe this Discord profile picture in 1-2 factual sentences. "
     "If it shows a real human face or body, mention visible hair, skin tone, "
@@ -55,6 +64,32 @@ def is_dr_umar_personality(settings):
     if isinstance(personality, dict) and personality.get("preset") == DR_UMAR_PRESET_ID:
         return True
     return settings.get("personality_name") == "Dr. Umar"
+
+
+def is_crip_mac_personality(settings):
+    """True when the active guild personality is the Crip Mac preset."""
+    if not settings:
+        return False
+    personality = settings.get("personality") or {}
+    if isinstance(personality, str):
+        return personality in {CRIP_MAC_PRESET_ID, "cripmac"}
+    if isinstance(personality, dict) and personality.get("preset") in {CRIP_MAC_PRESET_ID, "cripmac"}:
+        return True
+    name = str(settings.get("personality_name") or "").strip().lower()
+    return name in {"crip mac", "cripmac"}
+
+
+def crip_mac_gif_query(settings, roll=None, pick=None):
+    """Tenor search for a Crip Mac GIF, or None when this reply stays text-only."""
+    if not is_crip_mac_personality(settings):
+        return None
+    if roll is None:
+        roll = random.random()
+    if roll >= CRIP_MAC_GIF_CHANCE:
+        return None
+    if pick is None:
+        pick = random.randrange(len(CRIP_MAC_GIF_QUERIES))
+    return CRIP_MAC_GIF_QUERIES[pick % len(CRIP_MAC_GIF_QUERIES)]
 
 
 def author_custom_avatar_url(author, size=256):
@@ -994,6 +1029,7 @@ class Chat(commands.Cog):
         final_content = None
         use_mention = False
         want_gif = False
+        crip_gif_query = None
         try:
                 image_description, avatar_description, web_context = await asyncio.gather(
                     self._get_image_context(message, settings),
@@ -1002,7 +1038,11 @@ class Chat(commands.Cog):
                 )
 
                 # GIF is an add-on chance after a text reply, not a replacement.
-                want_gif = random.random() < float(settings.get("gif_chance", 0.10))
+                # Crip Mac ignores the chat-word search and sometimes drops one of his own GIFs.
+                if is_crip_mac_personality(settings):
+                    crip_gif_query = crip_mac_gif_query(settings)
+                else:
+                    want_gif = random.random() < float(settings.get("gif_chance", 0.10))
                 use_mention = (
                     is_mentioned
                     or is_reply_to_bot
@@ -1079,10 +1119,12 @@ class Chat(commands.Cog):
         try:
             async with message.channel.typing():
                 delivered = await self._try_send_reply(message, final_content, use_mention)
-                if delivered and want_gif and not delivered.startswith("http"):
+                gif_query = crip_gif_query
+                if delivered and not gif_query and want_gif and not delivered.startswith("http"):
                     search_words = [w for w in (message.content or "").lower().split() if len(w) > 3]
-                    search_query = random.choice(search_words) if search_words else "lol"
-                    gif_url = await search_gif(search_query)
+                    gif_query = random.choice(search_words) if search_words else "lol"
+                if delivered and gif_query and not delivered.startswith("http"):
+                    gif_url = await search_gif(gif_query)
                     if gif_url:
                         try:
                             await message.channel.send(gif_url)
