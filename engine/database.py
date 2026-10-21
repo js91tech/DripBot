@@ -2,6 +2,7 @@ import aiosqlite
 import json
 import os
 import asyncio
+import time
 
 
 class Database:
@@ -51,6 +52,27 @@ class Database:
                                     channel_id INTEGER,
                                     message TEXT,
                                     trigger_time REAL)"""
+        )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_questions (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    guild_id INTEGER,
+                                    question_type TEXT,
+                                    question TEXT,
+                                    options_json TEXT,
+                                    correct_answer TEXT,
+                                    acceptable_answers_json TEXT,
+                                    created_by INTEGER DEFAULT 0,
+                                    created_at REAL DEFAULT 0)"""
+        )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_scores (
+                                    guild_id INTEGER,
+                                    user_id INTEGER,
+                                    points INTEGER DEFAULT 0,
+                                    games_played INTEGER DEFAULT 0,
+                                    correct_answers INTEGER DEFAULT 0,
+                                    PRIMARY KEY (guild_id, user_id))"""
         )
         await self.conn.commit()
         self._worker_task = asyncio.create_task(self._write_worker())
@@ -126,6 +148,8 @@ class Database:
         await self.queue.put(
             ("DELETE FROM consolidated_memories WHERE guild_id = ?", (guild_id,))
         )
+        await self.queue.put(("DELETE FROM trivia_questions WHERE guild_id = ?", (guild_id,)))
+        await self.queue.put(("DELETE FROM trivia_scores WHERE guild_id = ?", (guild_id,)))
 
     async def add_memory(self, guild_id, user_id, note, limit: int = 12):
         """Store a short per-user memory, skipping near-duplicates and capping count."""
@@ -205,6 +229,187 @@ class Database:
 
     async def delete_reminder(self, reminder_id):
         await self.queue.put(("DELETE FROM reminders WHERE id = ?", (reminder_id,)))
+
+    async def flush(self):
+        """Wait for any queued writes to complete."""
+        await self.queue.join()
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Trivia Operations
+    # ═══════════════════════════════════════════════════════════════
+
+    async def add_trivia_question(
+        self,
+        guild_id: int,
+        question_type: str,
+        question: str,
+        options: list = None,
+        correct_answer: str = "",
+        acceptable_answers: list = None,
+        created_by: int = 0,
+    ) -> int:
+        """Add a custom trivia question for a guild and return its generated ID."""
+        options_json = json.dumps(options or [])
+        acceptable_json = json.dumps(acceptable_answers or [])
+        now = time.time()
+        cursor = await self.conn.execute(
+            """INSERT INTO trivia_questions 
+               (guild_id, question_type, question, options_json, correct_answer, acceptable_answers_json, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                guild_id,
+                question_type,
+                question,
+                options_json,
+                correct_answer,
+                acceptable_json,
+                created_by,
+                now,
+            ),
+        )
+        await self.conn.commit()
+        return cursor.lastrowid
+
+    async def get_trivia_questions(self, guild_id: int, question_type: str = None) -> list:
+        """Retrieve all custom trivia questions for a guild, optionally filtered by type."""
+        if question_type:
+            cursor = await self.conn.execute(
+                """SELECT id, guild_id, question_type, question, options_json, correct_answer, acceptable_answers_json, created_by, created_at
+                   FROM trivia_questions WHERE guild_id = ? AND question_type = ? ORDER BY id ASC""",
+                (guild_id, question_type),
+            )
+        else:
+            cursor = await self.conn.execute(
+                """SELECT id, guild_id, question_type, question, options_json, correct_answer, acceptable_answers_json, created_by, created_at
+                   FROM trivia_questions WHERE guild_id = ? ORDER BY id ASC""",
+                (guild_id,),
+            )
+        rows = await cursor.fetchall()
+        results = []
+        for row in rows:
+            results.append({
+                "id": row[0],
+                "guild_id": row[1],
+                "question_type": row[2],
+                "question": row[3],
+                "options": json.loads(row[4]) if row[4] else [],
+                "correct_answer": row[5],
+                "acceptable_answers": json.loads(row[6]) if row[6] else [],
+                "created_by": row[7],
+                "created_at": row[8],
+            })
+        return results
+
+    async def get_trivia_question_by_id(self, guild_id: int, question_id: int) -> dict:
+        """Retrieve a single trivia question by guild ID and question ID."""
+        cursor = await self.conn.execute(
+            """SELECT id, guild_id, question_type, question, options_json, correct_answer, acceptable_answers_json, created_by, created_at
+               FROM trivia_questions WHERE guild_id = ? AND id = ?""",
+            (guild_id, question_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "guild_id": row[1],
+            "question_type": row[2],
+            "question": row[3],
+            "options": json.loads(row[4]) if row[4] else [],
+            "correct_answer": row[5],
+            "acceptable_answers": json.loads(row[6]) if row[6] else [],
+            "created_by": row[7],
+            "created_at": row[8],
+        }
+
+    async def delete_trivia_question(self, guild_id: int, question_id: int) -> bool:
+        """Delete a single trivia question by ID."""
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ? AND id = ?",
+            (guild_id, question_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def clear_trivia_questions(self, guild_id: int) -> int:
+        """Delete all custom trivia questions for a guild."""
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ?",
+            (guild_id,),
+        )
+        await self.conn.commit()
+        return cursor.rowcount
+
+    async def update_trivia_score(
+        self,
+        guild_id: int,
+        user_id: int,
+        points: int = 10,
+        correct_answers: int = 1,
+        games_played: int = 0,
+    ):
+        """Update trivia leaderboard stats for a user."""
+        await self.conn.execute(
+            """INSERT INTO trivia_scores (guild_id, user_id, points, games_played, correct_answers)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                   points = points + ?,
+                   games_played = games_played + ?,
+                   correct_answers = correct_answers + ?""",
+            (
+                guild_id,
+                user_id,
+                points,
+                games_played,
+                correct_answers,
+                points,
+                games_played,
+                correct_answers,
+            ),
+        )
+        await self.conn.commit()
+
+    async def record_trivia_games_played(self, guild_id: int, user_ids: list):
+        """Increment games_played for participants."""
+        for user_id in user_ids:
+            await self.conn.execute(
+                """INSERT INTO trivia_scores (guild_id, user_id, points, games_played, correct_answers)
+                   VALUES (?, ?, 0, 1, 0)
+                   ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                       games_played = games_played + 1""",
+                (guild_id, user_id),
+            )
+        await self.conn.commit()
+
+    async def get_trivia_leaderboard(self, guild_id: int, limit: int = 10) -> list:
+        """Get top trivia scores for a guild."""
+        cursor = await self.conn.execute(
+            """SELECT user_id, points, games_played, correct_answers
+               FROM trivia_scores
+               WHERE guild_id = ?
+               ORDER BY points DESC, correct_answers DESC
+               LIMIT ?""",
+            (guild_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "user_id": row[0],
+                "points": row[1],
+                "games_played": row[2],
+                "correct_answers": row[3],
+            }
+            for row in rows
+        ]
+
+    async def reset_trivia_scores(self, guild_id: int):
+        """Reset the trivia leaderboard for a guild."""
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_scores WHERE guild_id = ?",
+            (guild_id,),
+        )
+        await self.conn.commit()
+        return cursor.rowcount
 
     async def close(self):
         if self._worker_task:

@@ -560,6 +560,13 @@ DEFAULT_SETTINGS = {
     # ── Puppet Mode (DM the bot to speak as it in a channel) ──
     "puppet_enabled": True,
     "puppet_target_channel": 0,
+
+    # ── Trivia Mode ──
+    "trivia_mode_enabled": True,
+    "trivia_timeout_seconds": 30,
+    "trivia_questions_per_game": 10,
+    "trivia_points_per_question": 10,
+    "trivia_include_defaults": True,
 }
 
 # Backward-compat alias — settings_cog.py and settings_manager.py import DEFAULTS
@@ -585,4 +592,9 @@ VALIDATORS = {
     "proactive_enabled": is_bool,
     "auto_router_enabled": is_bool,
     "puppet_enabled": is_bool,
+    "trivia_mode_enabled": is_bool,
+    "trivia_timeout_seconds": is_int,
+    "trivia_questions_per_game": is_int,
+    "trivia_points_per_question": is_int,
+    "trivia_include_defaults": is_bool,
 }
