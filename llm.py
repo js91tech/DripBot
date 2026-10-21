@@ -28,8 +28,137 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
 
-# Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
+# Default model (used when auto-router is off).
+# Verified against the live OpenRouter catalog on 2026-10-21. Model IDs on
+# OpenRouter are retired/renamed constantly — every :free ID we used before
+# this date now returns 404, which is why only gpt-4o (a surviving ID) worked.
+# Run scripts/check_models.py to re-validate these lists.
+DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+
+# Canonical model lists. api.py, cogs/settings_cog.py and dashboard.html
+# (manually — see tests/test_model_compat.py parity test) mirror these.
+FREE_MODELS = [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "minimax/minimax-m3.1-flash:free",
+    "thinkingmachines/inkling-small:free",
+    "thinkingmachines/inkling:free",
+    "recursive/flint-v1.0:free",
+]
+
+PAID_MODELS = [
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4.1",
+    "openai/gpt-5-mini",
+    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-haiku-4.5",
+    "anthropic/claude-opus-4.5",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "google/gemini-3.5-flash",
+    "meta-llama/llama-4-maverick",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-chat-v3.1",
+    "mistralai/mistral-large-2512",
+    "x-ai/grok-4.6",
+    "qwen/qwen3-235b-a22b-2507",
+    "microsoft/phi-4",
+    "cohere/command-r-plus-08-2024",
+    "openai/o3-mini",
+    "openai/o4-mini",
+]
+
+# Models that reject OpenAI sampling params outright (no temperature/top_p,
+# budget via max_completion_tokens). Per OpenRouter's catalog these IDs do
+# not list temperature in supported_parameters.
+_FIXED_SAMPLING_PREFIXES = (
+    "openai/o1",
+    "openai/o3",
+    "openai/o4",
+    "openai/gpt-5",
+)
+
+
+def _uses_fixed_sampling(model: str) -> bool:
+    lowered = (model or "").lower()
+    return lowered.startswith(_FIXED_SAMPLING_PREFIXES)
+
+
+# Substrings marking models that spend tokens on hidden thinking before
+# answering. They need a much larger budget than a 1-2 sentence reply,
+# otherwise the budget is consumed by reasoning and `content` comes back
+# empty with finish_reason=length.
+_THINKER_HINTS = (
+    "deepseek-r1",
+    "r1-0528",
+    "reasoning",
+    "thinking",
+    "o1-",
+    "o3-",
+    "o4-",
+    "gpt-5",
+    "nemotron-3-nano-omni",
+    "nemotron-3-super",
+    "nemotron-3-ultra",
+    "m3.1",
+    "inkling",
+)
+
+THINKER_MIN_BUDGET = 2000
+
+
+def _looks_like_thinker(model: str) -> bool:
+    lowered = (model or "").lower()
+    return any(hint in lowered for hint in _THINKER_HINTS)
+
+
+def build_chat_body(
+    model: str,
+    messages: list,
+    temperature: float = 0.8,
+    max_tokens: int = 2048,
+) -> dict:
+    """
+    Build an OpenRouter chat-completions body that every listed model accepts.
+
+    - No `reasoning` param is sent. It used to go out as
+      {"effort": "none"} on every request, and providers that do not
+      implement it answer 400 — one reason only gpt-4o worked.
+    - Fixed-sampling models (OpenAI o-series, GPT-5) get no `temperature`
+      and use `max_completion_tokens`, which is what their API requires.
+    - Likely thinkers get a budget floor so hidden thinking cannot eat the
+      whole allowance and return an empty `content`.
+    """
+    budget = int(max_tokens or 0) or 2048
+    if _looks_like_thinker(model):
+        budget = max(budget, THINKER_MIN_BUDGET)
+    if _uses_fixed_sampling(model):
+        return {
+            "model": model,
+            "messages": messages,
+            "max_completion_tokens": max(budget, THINKER_MIN_BUDGET),
+        }
+    return {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": budget,
+    }
+
+
+def _minimal_chat_body(model: str, messages: list, budget: int) -> dict:
+    """Smallest-possible body for the unsupported-parameter retry."""
+    if _uses_fixed_sampling(model):
+        return {
+            "model": model,
+            "messages": messages,
+            "max_completion_tokens": max(int(budget or 0), THINKER_MIN_BUDGET),
+        }
+    return {"model": model, "messages": messages, "max_tokens": max(int(budget or 0), 800)}
 
 # Discord replies are one or two sentences. Reasoning models will spend a
 # small max_tokens budget on hidden thinking and return an empty `content`,
@@ -247,9 +376,27 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
     }
 
 
-def _reasoning_request_rejected(error_text: str) -> bool:
+def _model_not_found(error_text: str) -> bool:
     lowered = (error_text or "").lower()
-    return "reasoning" in lowered
+    return (
+        "no endpoints found" in lowered
+        or "model not found" in lowered
+        or "not a valid model" in lowered
+    )
+
+
+def _unsupported_param_rejected(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    markers = (
+        "reasoning",
+        "unsupported parameter",
+        "extra inputs are not permitted",
+        "unsupported value",
+        "use 'max_completion_tokens' instead",
+        'use "max_completion_tokens" instead',
+        "does not support",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 class LLMHandler:
@@ -294,15 +441,16 @@ class LLMHandler:
         else:
             effective_model = self.default_model
 
-        # Build request body. effort=none keeps the token budget on the
-        # visible sentence instead of an empty content field.
-        body = {
-            "model": effective_model,
-            "messages": final_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "reasoning": {"effort": "none"},
-        }
+        # Build the request body. build_chat_body() keeps the payload to
+        # parameters every listed model accepts: no `reasoning` key (it
+        # 400s on providers that do not implement it), no `temperature`
+        # for fixed-sampling models, and a thinker-sized token budget.
+        body = build_chat_body(
+            effective_model,
+            final_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
         # Add allowed_models filter for auto-router
         if auto_router and allowed_models:
@@ -316,15 +464,40 @@ class LLMHandler:
         }
 
         result = await self._post_chat(body, headers)
-        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
-            logger.warning("Provider rejected reasoning=none; retrying without it")
-            body = dict(body)
-            body.pop("reasoning", None)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
+        if result["status"] == 400 and _unsupported_param_rejected(result["error"]):
+            # The provider rejected a sampling/pagination parameter (the old
+            # reasoning=none payload, temperature on o-series, or max_tokens
+            # where max_completion_tokens is required). Retry minimal.
+            logger.warning(
+                "Provider rejected request params for %s; retrying minimal: %s",
+                effective_model,
+                result["error"][:160],
+            )
+            body = _minimal_chat_body(
+                effective_model, final_messages, max_tokens
+            )
             result = await self._post_chat(body, headers)
         elif result["status"] in {429, 500, 502, 503, 504}:
             logger.warning(f"OpenRouter {result['status']}; retrying once")
             await asyncio.sleep(1.0)
+            result = await self._post_chat(body, headers)
+        elif _model_not_found(result["error"]) and effective_model != DEFAULT_MODEL:
+            # Stale model ID in this guild's settings (OpenRouter retires IDs
+            # regularly). Fall back to the default so the bot still answers
+            # instead of typing into silence.
+            logger.warning(
+                "Model %s not found on OpenRouter; falling back to %s: %s",
+                effective_model,
+                DEFAULT_MODEL,
+                result["error"][:160],
+            )
+            body = build_chat_body(
+                DEFAULT_MODEL,
+                final_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            effective_model = DEFAULT_MODEL
             result = await self._post_chat(body, headers)
         elif result["status"] == 200 and not result["text"]:
             # Tokens were spent before a sentence existed (usually reasoning
@@ -333,9 +506,9 @@ class LLMHandler:
                 "OpenRouter returned no visible reply (finish_reason=%s); retrying",
                 result.get("finish_reason"),
             )
+            budget_key = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
             body = dict(body)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
-            body["reasoning"] = {"effort": "minimal"}
+            body[budget_key] = max(int(body.get(budget_key) or 0) * 3, THINKER_MIN_BUDGET)
             result = await self._post_chat(body, headers)
 
         if result["status"] != 200 or not result["text"]:
@@ -747,7 +920,7 @@ async def parse_settings_command(prompt: str):
         "Return ONLY a JSON object with exactly two fields: \"key\" and \"value\". "
         "No other text, no markdown formatting.\n\n"
         "Valid setting keys and their expected value types:\n"
-        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
+        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4.5\")\n"
         "- response_enabled: boolean\n"
         "- cooldown_seconds: integer\n"
         "- trigger_on_mention: boolean\n"

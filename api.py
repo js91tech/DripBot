@@ -35,45 +35,9 @@ from config.default_settings import (
     normalize_personality_preset,
 )
 
+from llm import DEFAULT_MODEL, FREE_MODELS, PAID_MODELS
+
 logger = logging.getLogger("dripsletongue.api")
-
-
-# -- Model Lists --
-FREE_MODELS = [
-    "meta-llama/llama-4-maverick:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-235b-a22b:free",
-    "microsoft/phi-4-reasoning-plus:free",
-    "deepseek/deepseek-r1:free",
-    "nvidia/llama-3.1-nemotron-70b-instruct:free",
-    "google/gemma-3-12b-it:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
-    "qwen/qwen3-32b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-]
-
-PAID_MODELS = [
-    "openai/gpt-4o",
-    "openai/gpt-4.1",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-opus-4",
-    "google/gemini-2.5-pro",
-    "google/gemini-2.5-flash",
-    "meta-llama/llama-4-maverick",
-    "deepseek/deepseek-chat-v3-0324",
-    "mistralai/mistral-large-2411",
-    "x-ai/grok-3",
-    "x-ai/grok-3-mini",
-    "openai/o3-mini",
-    "openai/o4-mini",
-    "anthropic/claude-haiku-3.5",
-    "perplexity/llama-3.1-sonar-huge-128k-online",
-    "nvidia/llama-3.1-nemotron-ultra-253b",
-    "qwen/qwen3-235b-a22b",
-    "microsoft/phi-4",
-    "meta-llama/llama-3.1-405b-instruct",
-    "cohere/command-r-plus-08-2024",
-]
 
 
 def _personality_presets_payload():
@@ -420,7 +384,7 @@ def create_api(bot_instance):
             sm, err = _get_settings_manager(bot_instance)
             if err:
                 raise err
-            active = "meta-llama/llama-4-maverick:free"
+            active = DEFAULT_MODEL
             if sm and sm.settings:
                 gid = _resolve_guild_id(bot_instance, sm, guild_id)
                 # Read llm_model first (used by cogs), fall back to model (used by dashboard)
