@@ -8,9 +8,12 @@ from engine.database import Database
 from trivia import (
     BUSY,
     EXAMPLE_QUESTIONS,
+    ADMIN_HELP_TEXT,
     HELP_TEXT,
     NONE_RUNNING,
+    PLAYER_HELP_TEXT,
     PUBLIC_HELP_TEXT,
+    help_text,
     MAX_BANK,
     TriviaError,
     TriviaSession,
@@ -87,13 +90,19 @@ class TriviaGradeTests(unittest.TestCase):
             "open": 5,
         })
         self.assertLess(len(HELP_TEXT), 1900)
+        self.assertLess(len(help_text(True)), 1900)
         self.assertLess(len(PUBLIC_HELP_TEXT), 1900)
-        self.assertIn("!trivia add mc", HELP_TEXT)
-        self.assertIn("!trivia add tf", HELP_TEXT)
-        self.assertIn("!trivia add open", HELP_TEXT)
-        self.assertIn("loadexamples", HELP_TEXT)
+        self.assertIn("!trivia add mc", ADMIN_HELP_TEXT)
+        self.assertIn("!trivia add tf", ADMIN_HELP_TEXT)
+        self.assertIn("!trivia add open", ADMIN_HELP_TEXT)
+        self.assertIn("Paris | London | Berlin | Madrid", ADMIN_HELP_TEXT)
+        self.assertIn("Also accept", ADMIN_HELP_TEXT)
+        self.assertIn("loadexamples", ADMIN_HELP_TEXT)
+        self.assertIn("/trivia help", PLAYER_HELP_TEXT)
+        self.assertNotIn("!trivia", help_text(False))
         for public_text in (
             PUBLIC_HELP_TEXT,
+            help_text(False),
             empty_bank_message(),
             start_announcement(10, 15, 10),
             BUSY,
@@ -380,13 +389,15 @@ class TriviaCommandRegistrationTests(unittest.TestCase):
 
         bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
         cog = Trivia(bot)
-        self.assertEqual([command.name for command in cog.get_commands()], ["trivia"])
+        self.assertEqual({command.name for command in cog.get_commands()}, {"trivia", "help"})
         prefix = {command.name for command in cog.trivia.walk_commands()}
         self.assertTrue({"start", "add", "loadexamples", "clear", "list"} <= prefix)
 
         app_commands = cog.get_app_commands()
-        self.assertEqual([command.name for command in app_commands], ["trivia"])
-        slash_commands = list(app_commands[0].walk_commands())
+        app_names = {command.name for command in app_commands}
+        self.assertEqual(app_names, {"trivia", "help"})
+        trivia_group = next(command for command in app_commands if command.name == "trivia")
+        slash_commands = list(trivia_group.walk_commands())
         slash_names = {command.name for command in slash_commands}
         self.assertTrue({"start", "add", "loadexamples", "remove"} <= slash_names)
         self.assertLessEqual(len(slash_commands), 25)
@@ -396,6 +407,7 @@ class TriviaCommandRegistrationTests(unittest.TestCase):
             for param in command.parameters:
                 choices = getattr(param, "choices", None) or []
                 self.assertLessEqual(len(choices), 25)
+                self.assertLessEqual(len(getattr(param, "description", "") or ""), 100)
 
         with open("cogs/chat.py", encoding="utf-8") as handle:
             source = handle.read()
