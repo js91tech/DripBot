@@ -3,6 +3,7 @@ from config.default_settings import (
     build_custom_personality_settings_update,
     build_personality_settings_update,
 )
+from config.models import resolve_image_model, resolve_model
 import copy
 
 
@@ -29,12 +30,28 @@ class SettingsManager:
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
                 self.cache[guild_id] = full_settings
-                if self._normalize_personality_settings(self.cache[guild_id]):
+                personality_changed = self._normalize_personality_settings(self.cache[guild_id])
+                models_changed = self._replace_retired_models(self.cache[guild_id])
+                if personality_changed or models_changed:
                     await self.db.save_settings(guild_id, self.cache[guild_id])
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
                 await self.db.save_settings(guild_id, self.cache[guild_id])
         return self.cache[guild_id]
+
+    def _replace_retired_models(self, settings):
+        """Move saved model IDs that OpenRouter has dropped onto current ones."""
+        changed = False
+        for key in ("llm_model", "model"):
+            current = settings.get(key)
+            if current and resolve_model(current) != current:
+                settings[key] = resolve_model(current)
+                changed = True
+        image_model = settings.get("image_model")
+        if image_model and resolve_image_model(image_model) != image_model:
+            settings["image_model"] = resolve_image_model(image_model)
+            changed = True
+        return changed
 
     def _normalize_personality_settings(self, settings):
         """Repair legacy or manually-set personality values into the supported shape."""
