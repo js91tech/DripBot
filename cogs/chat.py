@@ -879,7 +879,8 @@ class Chat(commands.Cog):
         if message.guild is None or message.author == self.bot.user:
             return
 
-        trivia_cog = self.bot.get_cog("TriviaCog")
+        get_cog = getattr(self.bot, "get_cog", None)
+        trivia_cog = get_cog("TriviaCog") if get_cog else None
         if trivia_cog and trivia_cog.is_active(message.channel.id):
             return
 
