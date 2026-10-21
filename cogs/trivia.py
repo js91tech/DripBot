@@ -12,7 +12,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import prefix_command_allowed, prefix_owner_ids
 from trivia import (
     BETWEEN,
     BUSY,
@@ -386,6 +385,7 @@ class Trivia(commands.Cog):
         await ctx.send(await self._summary(ctx.guild.id))
 
     @trivia.command(name="add")
+    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     async def trivia_add(self, ctx, *, payload: str):
         """Add a multiple choice, true/false, or open-ended question."""
@@ -393,6 +393,7 @@ class Trivia(commands.Cog):
         await ctx.send(await self._save_question(ctx.guild.id, ctx.author.id, question))
 
     @trivia.command(name="list", aliases=["bank"])
+    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     async def trivia_list(self, ctx):
         """DM the question bank, including answers."""
@@ -410,18 +411,21 @@ class Trivia(commands.Cog):
         await ctx.send(f"Sent the trivia bank to your DMs ({len(pages)} {word}).")
 
     @trivia.command(name="remove", aliases=["delete"])
+    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     async def trivia_remove(self, ctx, question_id: int):
         """Delete one question by id."""
         await ctx.send(await self._remove_question(ctx.guild.id, question_id))
 
     @trivia.command(name="loadexamples", aliases=["examples", "seed"])
+    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     async def trivia_loadexamples(self, ctx):
         """Add 5 multiple choice, 5 true/false, and 5 open-ended samples."""
         await ctx.send(await self._load_examples(ctx.guild.id, ctx.author.id))
 
     @trivia.command(name="clear")
+    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     async def trivia_clear(self, ctx, confirm: str = None):
         """Delete the whole bank. Requires the word confirm."""
@@ -434,9 +438,6 @@ class Trivia(commands.Cog):
 
     async def cog_command_error(self, ctx, error):
         original = getattr(error, "original", error)
-        author_id = getattr(getattr(ctx, "author", None), "id", None)
-        if not prefix_command_allowed(author_id, prefix_owner_ids(getattr(ctx, "bot", None))):
-            return
         if isinstance(original, commands.MissingPermissions):
             await ctx.send("Only server admins (Manage Server) can change the trivia bank.")
             return

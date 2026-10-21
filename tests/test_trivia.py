@@ -5,7 +5,6 @@ import unittest
 from types import SimpleNamespace
 
 from engine.database import Database
-from utils import prefix_command_allowed, prefix_owner_ids
 from trivia import (
     BUSY,
     EXAMPLE_QUESTIONS,
@@ -372,23 +371,6 @@ class TriviaRoundFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Ada", texts[-1])
 
 
-class PrefixPrivacyTests(unittest.TestCase):
-    def test_only_the_bot_owner_can_use_prefix_commands(self):
-        self.assertFalse(prefix_command_allowed(5, []))
-        self.assertFalse(prefix_command_allowed(5, [9]))
-        self.assertTrue(prefix_command_allowed(9, [9]))
-        self.assertTrue(prefix_command_allowed("9", ["9"]))
-        bot = SimpleNamespace(
-            owner_id=None,
-            owner_ids=[],
-            application=SimpleNamespace(owner=SimpleNamespace(id=42), team=None),
-        )
-        ids = [owner_id for owner_id in prefix_owner_ids(bot) if owner_id != 7]
-        self.assertIn(42, ids)
-        self.assertTrue(prefix_command_allowed(42, ids))
-        self.assertFalse(prefix_command_allowed(7, ids))
-
-
 class TriviaCommandRegistrationTests(unittest.TestCase):
     def test_prefix_and_slash_commands_register(self):
         import discord
@@ -422,8 +404,7 @@ class TriviaCommandRegistrationTests(unittest.TestCase):
             bot_source = handle.read()
         self.assertIn('load_extension("cogs.trivia")', bot_source)
         self.assertIn("message.delete()", bot_source)
-        self.assertIn("prefix_command_allowed", bot_source)
-        self.assertIn("PrivatePrefixContext", bot_source)
+        self.assertNotIn("PrivatePrefixContext", bot_source)
 
 
 if __name__ == "__main__":
