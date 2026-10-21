@@ -157,6 +157,13 @@ async def on_ready():
         cog_load_errors.append(f"chat: {e}")
         logger.error(f"Failed to load chat cog: {e}", exc_info=True)
 
+    try:
+        await bot.load_extension("cogs.trivia")
+        logger.info("Loaded cog: cogs.trivia (trivia mode)")
+    except Exception as e:
+        cog_load_errors.append(f"cogs.trivia: {e}")
+        logger.error(f"Failed to load cogs.trivia: {e}", exc_info=True)
+
     # Sync slash commands to Discord
     try:
         synced = await bot.tree.sync()
