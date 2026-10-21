@@ -5,8 +5,13 @@ import discord
 
 from cogs.chat import Chat
 from llm import (
+    DEFAULT_MODEL,
+    LLMHandler,
+    _model_supports_reasoning_param,
+    _model_supports_temperature,
     content_to_visible_text,
     flatten_text_content,
+    resolve_model_id,
     route_chat_messages,
     visible_reply_from_completion,
 )
@@ -342,6 +347,102 @@ class OnMessageSentenceTests(unittest.IsolatedAsyncioTestCase):
         channel = await self._run(None)
         self.assertEqual(channel.sent, [])
         self.assertNotIn("typing", channel.log)
+
+
+class ModelResolutionAndRetryTests(unittest.IsolatedAsyncioTestCase):
+    def test_retired_models_resolve_to_active_ids(self):
+        self.assertEqual(resolve_model_id("meta-llama/llama-4-maverick:free"), "openrouter/free")
+        self.assertEqual(resolve_model_id("google/gemma-3-27b-it:free"), "google/gemma-4-31b-it:free")
+        self.assertEqual(resolve_model_id("anthropic/claude-sonnet-4"), "anthropic/claude-sonnet-4.5")
+        self.assertEqual(resolve_model_id("anthropic/claude-opus-4"), "anthropic/claude-opus-4.5")
+        self.assertEqual(resolve_model_id("anthropic/claude-haiku-3.5"), "anthropic/claude-haiku-4.5")
+        self.assertEqual(resolve_model_id("mistralai/mistral-large-2411"), "mistralai/mistral-large")
+        self.assertEqual(resolve_model_id("x-ai/grok-3"), "x-ai/grok-4.20")
+        self.assertEqual(resolve_model_id("openai/gpt-4o"), "openai/gpt-4o")
+        self.assertEqual(resolve_model_id(None), DEFAULT_MODEL)
+
+    def test_parameter_support_detection(self):
+        self.assertFalse(_model_supports_reasoning_param("openai/gpt-4o"))
+        self.assertFalse(_model_supports_reasoning_param("meta-llama/llama-4-maverick"))
+        self.assertTrue(_model_supports_reasoning_param("google/gemini-2.5-pro"))
+        self.assertTrue(_model_supports_reasoning_param("openrouter/free"))
+        self.assertFalse(_model_supports_temperature("openai/o3-mini"))
+        self.assertFalse(_model_supports_temperature("openai/o4-mini"))
+        self.assertTrue(_model_supports_temperature("openai/gpt-4o"))
+
+    async def test_chat_falls_back_when_model_returns_404(self):
+        handler = LLMHandler()
+        handler.api_key = "test-key"
+        calls = []
+
+        async def fake_post(body, headers):
+            calls.append(dict(body))
+            if len(calls) == 1:
+                return {
+                    "status": 404,
+                    "error": '{"error":{"message":"No endpoints found for dead/model:free","code":404}}',
+                    "text": "",
+                    "finish_reason": None,
+                    "model_used": body.get("model"),
+                    "usage": {},
+                }
+            return {
+                "status": 200,
+                "error": "",
+                "text": "Recovered from fallback.",
+                "finish_reason": "stop",
+                "model_used": body.get("model"),
+                "usage": {},
+            }
+
+        with patch.object(handler, "_post_chat", fake_post):
+            res = await handler.chat(
+                [{"role": "user", "content": "yo"}],
+                model="dead/model:free",
+                auto_router=False,
+            )
+        self.assertIsNotNone(res)
+        self.assertEqual(res["content"], "Recovered from fallback.")
+        self.assertEqual(calls[0]["model"], "dead/model:free")
+        self.assertEqual(calls[1]["model"], "openrouter/free")
+
+    async def test_chat_retries_without_reasoning_when_empty(self):
+        handler = LLMHandler()
+        handler.api_key = "test-key"
+        calls = []
+
+        async def fake_post(body, headers):
+            calls.append(dict(body))
+            if len(calls) == 1:
+                return {
+                    "status": 200,
+                    "error": "",
+                    "text": "",
+                    "finish_reason": "length",
+                    "model_used": body.get("model"),
+                    "usage": {},
+                }
+            return {
+                "status": 200,
+                "error": "",
+                "text": "Got a real sentence.",
+                "finish_reason": "stop",
+                "model_used": body.get("model"),
+                "usage": {},
+            }
+
+        with patch.object(handler, "_post_chat", fake_post):
+            res = await handler.chat(
+                [{"role": "user", "content": "yo"}],
+                model="google/gemini-2.5-pro",
+                auto_router=False,
+                max_tokens=400,
+            )
+        self.assertIsNotNone(res)
+        self.assertEqual(res["content"], "Got a real sentence.")
+        self.assertIn("reasoning", calls[0])
+        self.assertNotIn("reasoning", calls[1])
+        self.assertGreaterEqual(calls[1]["max_tokens"], 1024)
 
 
 if __name__ == "__main__":

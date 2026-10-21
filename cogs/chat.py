@@ -588,7 +588,7 @@ class Chat(commands.Cog):
             system_msg = {
                 "role": "system",
                 "content": prompt,
-                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free"),
+                "model": settings.get("llm_model", "openrouter/free"),
                 "auto_router": settings.get("auto_router_enabled", False),
                 "allowed_models": settings.get("auto_router_allowed_models") or None,
             }
@@ -650,7 +650,7 @@ class Chat(commands.Cog):
             chat_history.insert(0, {
                 "role": "system",
                 "content": prompt,
-                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free"),
+                "model": settings.get("llm_model", "openrouter/free"),
             })
             summary = await generate_llm_response(prompt, chat_history, max_tokens=160, temperature=0.3)
             if summary:
@@ -1098,7 +1098,7 @@ class Chat(commands.Cog):
                 chat_history.insert(0, {
                     "role": "system",
                     "content": dynamic_prompt,
-                    "model": settings.get("llm_model") or settings.get("model") or "meta-llama/llama-4-maverick:free",
+                    "model": settings.get("llm_model") or settings.get("model") or "openrouter/free",
                     "auto_router": settings.get("auto_router_enabled", False),
                     "allowed_models": settings.get("auto_router_allowed_models") or None,
                 })

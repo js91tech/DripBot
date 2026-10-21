@@ -155,16 +155,21 @@ class SettingsCog(commands.Cog):
     @group.command(name="modelfree", description="Switch to a free LLM model")
     @app_commands.describe(model="Choose a free LLM model")
     @app_commands.choices(model=[
-        app_commands.Choice(name="Llama 4 Maverick (Free)", value="meta-llama/llama-4-maverick:free"),
-        app_commands.Choice(name="Gemma 3 27B (Free)", value="google/gemma-3-27b-it:free"),
-        app_commands.Choice(name="Qwen3 235B (Free)", value="qwen/qwen3-235b-a22b:free"),
-        app_commands.Choice(name="Phi-4 Reasoning+ (Free)", value="microsoft/phi-4-reasoning-plus:free"),
-        app_commands.Choice(name="DeepSeek R1 (Free)", value="deepseek/deepseek-r1:free"),
-        app_commands.Choice(name="Nemotron 70B (Free)", value="nvidia/llama-3.1-nemotron-70b-instruct:free"),
-        app_commands.Choice(name="Gemma 3 12B (Free)", value="google/gemma-3-12b-it:free"),
-        app_commands.Choice(name="Mistral Small 3.1 (Free)", value="mistralai/mistral-small-3.1-24b-instruct:free"),
-        app_commands.Choice(name="Qwen3 32B (Free)", value="qwen/qwen3-32b:free"),
-        app_commands.Choice(name="Llama 3.3 70B (Free)", value="meta-llama/llama-3.3-70b-instruct:free"),
+        app_commands.Choice(name="Free Models Router (Auto Free)", value="openrouter/free"),
+        app_commands.Choice(name="Gemma 4 31B (Free)", value="google/gemma-4-31b-it:free"),
+        app_commands.Choice(name="Gemma 4 26B A4B (Free)", value="google/gemma-4-26b-a4b-it:free"),
+        app_commands.Choice(name="Nemotron 3 Super 120B (Free)", value="nvidia/nemotron-3-super-120b-a12b:free"),
+        app_commands.Choice(name="Nemotron 3 Ultra 550B (Free)", value="nvidia/nemotron-3-ultra-550b-a55b:free"),
+        app_commands.Choice(name="Nemotron 3.5 Lightning (Free)", value="nvidia/nemotron-3.5-lightning:free"),
+        app_commands.Choice(name="Nemotron 3 Nano Omni (Free)", value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
+        app_commands.Choice(name="MiniMax M3.1 Flash (Free)", value="minimax/minimax-m3.1-flash:free"),
+        app_commands.Choice(name="Xing4.0 29B (Free)", value="xingchen-agi/xing4.0-29b-a4b:free"),
+        app_commands.Choice(name="Inkling (Free)", value="thinkingmachines/inkling:free"),
+        app_commands.Choice(name="Inkling Small (Free)", value="thinkingmachines/inkling-small:free"),
+        app_commands.Choice(name="Laguna S 2.1 (Free)", value="poolside/laguna-s-2.1:free"),
+        app_commands.Choice(name="Flint v1.0 (Free)", value="recursive/flint-v1.0:free"),
+        app_commands.Choice(name="LFM 2.5 2.6B (Free)", value="liquid/lfm-2.5-2.6b:free"),
+        app_commands.Choice(name="North Mini Code (Free)", value="cohere/north-mini-code:free"),
     ])
     async def modelfree_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
@@ -178,19 +183,27 @@ class SettingsCog(commands.Cog):
     @app_commands.describe(model="Choose a paid LLM model")
     @app_commands.choices(model=[
         app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
+        app_commands.Choice(name="GPT-4o Mini", value="openai/gpt-4o-mini"),
         app_commands.Choice(name="GPT-4.1", value="openai/gpt-4.1"),
-        app_commands.Choice(name="Claude Sonnet 4", value="anthropic/claude-sonnet-4"),
-        app_commands.Choice(name="Claude Opus 4", value="anthropic/claude-opus-4"),
+        app_commands.Choice(name="GPT-4.1 Mini", value="openai/gpt-4.1-mini"),
+        app_commands.Choice(name="GPT-5", value="openai/gpt-5"),
+        app_commands.Choice(name="GPT-5 Mini", value="openai/gpt-5-mini"),
+        app_commands.Choice(name="Claude Sonnet 4.5", value="anthropic/claude-sonnet-4.5"),
+        app_commands.Choice(name="Claude Opus 4.5", value="anthropic/claude-opus-4.5"),
+        app_commands.Choice(name="Claude Haiku 4.5", value="anthropic/claude-haiku-4.5"),
+        app_commands.Choice(name="Claude Sonnet 5", value="anthropic/claude-sonnet-5"),
         app_commands.Choice(name="Gemini 2.5 Pro", value="google/gemini-2.5-pro"),
         app_commands.Choice(name="Gemini 2.5 Flash", value="google/gemini-2.5-flash"),
         app_commands.Choice(name="Llama 4 Maverick", value="meta-llama/llama-4-maverick"),
-        app_commands.Choice(name="DeepSeek Chat V3", value="deepseek/deepseek-chat-v3-0324"),
-        app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large-2411"),
-        app_commands.Choice(name="Grok 3", value="x-ai/grok-3"),
-        app_commands.Choice(name="Grok 3 Mini", value="x-ai/grok-3-mini"),
+        app_commands.Choice(name="Llama 3.3 70B", value="meta-llama/llama-3.3-70b-instruct"),
+        app_commands.Choice(name="DeepSeek Chat V3", value="deepseek/deepseek-chat"),
+        app_commands.Choice(name="DeepSeek R1", value="deepseek/deepseek-r1-0528"),
+        app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large"),
+        app_commands.Choice(name="Grok 4.20", value="x-ai/grok-4.20"),
+        app_commands.Choice(name="Grok 4.5", value="x-ai/grok-4.5"),
+        app_commands.Choice(name="Qwen3 235B", value="qwen/qwen3-235b-a22b-2507"),
         app_commands.Choice(name="o3-mini", value="openai/o3-mini"),
         app_commands.Choice(name="o4-mini", value="openai/o4-mini"),
-        app_commands.Choice(name="Claude Haiku 3.5", value="anthropic/claude-haiku-3.5"),
     ])
     async def modelpaid_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
@@ -325,11 +338,11 @@ class SettingsCog(commands.Cog):
     @app_commands.describe(model="Choose an image generation model")
     @app_commands.choices(model=[
         app_commands.Choice(name="Z.ai Sidecar (Free)", value="zai-sidecar"),
-        app_commands.Choice(name="GPT-4o (Best Quality)", value="openai/gpt-4o"),
-        app_commands.Choice(name="GPT-4o Mini (Cheaper)", value="openai/gpt-4o-mini"),
-        app_commands.Choice(name="Claude 3.5 Sonnet", value="anthropic/claude-3.5-sonnet"),
-        app_commands.Choice(name="Claude 3.7 Sonnet", value="anthropic/claude-3.7-sonnet"),
-        app_commands.Choice(name="Gemini 2.0 Flash (Free)", value="google/gemini-2.0-flash-exp:free"),
+        app_commands.Choice(name="Gemini 2.5 Flash Image", value="google/gemini-2.5-flash-image"),
+        app_commands.Choice(name="Gemini 3.1 Flash Image", value="google/gemini-3.1-flash-image"),
+        app_commands.Choice(name="Gemini 3 Pro Image", value="google/gemini-3-pro-image"),
+        app_commands.Choice(name="GPT-5 Image (Best Quality)", value="openai/gpt-5-image"),
+        app_commands.Choice(name="GPT-5 Image Mini (Cheaper)", value="openai/gpt-5-image-mini"),
         app_commands.Choice(name="Pollinations (Always Free)", value="pollinations"),
     ])
     async def imgmodel_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
@@ -473,7 +486,7 @@ class SettingsCog(commands.Cog):
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": roast_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+                            "model": settings.get("llm_model", "openrouter/free")})
         response = await generate_llm_response(roast_prompt, chat_history)
         if response:
             await interaction.followup.send(f"**Roasting {user.display_name}:** {sanitize_message(response)}")
@@ -507,7 +520,7 @@ class SettingsCog(commands.Cog):
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": mimic_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+                            "model": settings.get("llm_model", "openrouter/free")})
         try:
             response = await generate_llm_response(mimic_prompt, chat_history)
             if response:

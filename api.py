@@ -35,44 +35,60 @@ from config.default_settings import (
     normalize_personality_preset,
 )
 
+from llm import resolve_model_id
+
 logger = logging.getLogger("dripsletongue.api")
 
 
 # -- Model Lists --
 FREE_MODELS = [
-    "meta-llama/llama-4-maverick:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-235b-a22b:free",
-    "microsoft/phi-4-reasoning-plus:free",
-    "deepseek/deepseek-r1:free",
-    "nvidia/llama-3.1-nemotron-70b-instruct:free",
-    "google/gemma-3-12b-it:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
-    "qwen/qwen3-32b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "minimax/minimax-m3.1-flash:free",
+    "xingchen-agi/xing4.0-29b-a4b:free",
+    "thinkingmachines/inkling:free",
+    "thinkingmachines/inkling-small:free",
+    "poolside/laguna-s-2.1:free",
+    "recursive/flint-v1.0:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "cohere/north-mini-code:free",
 ]
 
 PAID_MODELS = [
     "openai/gpt-4o",
+    "openai/gpt-4o-mini",
     "openai/gpt-4.1",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-opus-4",
+    "openai/gpt-4.1-mini",
+    "openai/gpt-5",
+    "openai/gpt-5-mini",
+    "openai/o3-mini",
+    "openai/o4-mini",
+    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-opus-4.5",
+    "anthropic/claude-haiku-4.5",
+    "anthropic/claude-sonnet-5",
     "google/gemini-2.5-pro",
     "google/gemini-2.5-flash",
     "meta-llama/llama-4-maverick",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-chat",
     "deepseek/deepseek-chat-v3-0324",
-    "mistralai/mistral-large-2411",
-    "x-ai/grok-3",
-    "x-ai/grok-3-mini",
-    "openai/o3-mini",
-    "openai/o4-mini",
-    "anthropic/claude-haiku-3.5",
-    "perplexity/llama-3.1-sonar-huge-128k-online",
-    "nvidia/llama-3.1-nemotron-ultra-253b",
-    "qwen/qwen3-235b-a22b",
+    "deepseek/deepseek-r1-0528",
+    "mistralai/mistral-large",
+    "mistralai/mistral-small-3.2-24b-instruct",
+    "x-ai/grok-4.20",
+    "x-ai/grok-4.5",
+    "qwen/qwen3-235b-a22b-2507",
+    "qwen/qwen3-32b",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "perplexity/sonar-pro",
     "microsoft/phi-4",
-    "meta-llama/llama-3.1-405b-instruct",
-    "cohere/command-r-plus-08-2024",
+    "cohere/command-a",
 ]
 
 
@@ -420,11 +436,13 @@ def create_api(bot_instance):
             sm, err = _get_settings_manager(bot_instance)
             if err:
                 raise err
-            active = "meta-llama/llama-4-maverick:free"
+            active = "openrouter/free"
             if sm and sm.settings:
                 gid = _resolve_guild_id(bot_instance, sm, guild_id)
                 # Read llm_model first (used by cogs), fall back to model (used by dashboard)
-                active = sm.settings[gid].get("llm_model") or sm.settings[gid].get("model", active)
+                active = resolve_model_id(
+                    sm.settings[gid].get("llm_model") or sm.settings[gid].get("model", active)
+                )
             return {"active_model": active, "free_models": FREE_MODELS, "paid_models": PAID_MODELS}
         except HTTPException:
             raise
@@ -436,7 +454,7 @@ def create_api(bot_instance):
     async def set_model(request: Request):
         try:
             body = await request.json()
-            model = body.get("model", "")
+            model = resolve_model_id(body.get("model", "")) if body.get("model") else ""
             if not model:
                 raise HTTPException(400, detail="No model specified")
             all_models = FREE_MODELS + PAID_MODELS

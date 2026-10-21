@@ -3,6 +3,7 @@ from config.default_settings import (
     build_custom_personality_settings_update,
     build_personality_settings_update,
 )
+from llm import resolve_model_id
 import copy
 
 
@@ -29,12 +30,28 @@ class SettingsManager:
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
                 self.cache[guild_id] = full_settings
-                if self._normalize_personality_settings(self.cache[guild_id]):
+                dirty = self._normalize_personality_settings(self.cache[guild_id])
+                if self._normalize_model_settings(self.cache[guild_id]):
+                    dirty = True
+                if dirty:
                     await self.db.save_settings(guild_id, self.cache[guild_id])
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
                 await self.db.save_settings(guild_id, self.cache[guild_id])
         return self.cache[guild_id]
+
+    def _normalize_model_settings(self, settings):
+        """Migrate retired OpenRouter model IDs to active replacements and keep model/llm_model synced."""
+        changed = False
+        raw_llm = settings.get("llm_model") or settings.get("model")
+        resolved = resolve_model_id(raw_llm)
+        if settings.get("llm_model") != resolved:
+            settings["llm_model"] = resolved
+            changed = True
+        if settings.get("model") != resolved:
+            settings["model"] = resolved
+            changed = True
+        return changed
 
     def _normalize_personality_settings(self, settings):
         """Repair legacy or manually-set personality values into the supported shape."""
@@ -90,11 +107,17 @@ class SettingsManager:
                 self.cache[guild_id].update(settings_dict)
         if guild_id in self.cache:
             self._normalize_personality_settings(self.cache[guild_id])
+            self._normalize_model_settings(self.cache[guild_id])
         await self.db.save_settings(guild_id, self.cache.get(guild_id, {}))
 
     async def set_setting(self, guild_id, key, value):
         settings = await self.get_settings(guild_id)
-        settings[key] = value
+        if key in {"llm_model", "model"}:
+            resolved = resolve_model_id(value)
+            settings["llm_model"] = resolved
+            settings["model"] = resolved
+        else:
+            settings[key] = value
         await self.save_settings(guild_id)
         return settings
 

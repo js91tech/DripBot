@@ -29,7 +29,93 @@ OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
 
 # Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
+DEFAULT_MODEL = "openrouter/free"
+
+# Legacy or retired OpenRouter model IDs mapped to active replacements so
+# existing guild settings in the database keep working without manual resets.
+LEGACY_MODEL_MAP = {
+    # Retired :free slugs -> current OpenRouter free models / router
+    "meta-llama/llama-4-maverick:free": "openrouter/free",
+    "google/gemma-3-27b-it:free": "google/gemma-4-31b-it:free",
+    "google/gemma-3-12b-it:free": "google/gemma-4-26b-a4b-it:free",
+    "qwen/qwen3-235b-a22b:free": "openrouter/free",
+    "qwen/qwen3-32b:free": "openrouter/free",
+    "microsoft/phi-4-reasoning-plus:free": "openrouter/free",
+    "deepseek/deepseek-r1:free": "openrouter/free",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free": "nvidia/nemotron-3-super-120b-a12b:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free": "openrouter/free",
+    "meta-llama/llama-3.3-70b-instruct:free": "openrouter/free",
+    "google/gemini-2.0-flash-exp:free": "openrouter/free",
+    # Retired or renamed paid model slugs -> current active OpenRouter IDs
+    "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-3.5-sonnet": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-3.7-sonnet": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-opus-4": "anthropic/claude-opus-4.5",
+    "anthropic/claude-haiku-3.5": "anthropic/claude-haiku-4.5",
+    "mistralai/mistral-large-2411": "mistralai/mistral-large",
+    "x-ai/grok-3": "x-ai/grok-4.20",
+    "x-ai/grok-3-mini": "x-ai/grok-4.20",
+    "perplexity/llama-3.1-sonar-huge-128k-online": "perplexity/sonar-pro",
+    "nvidia/llama-3.1-nemotron-ultra-253b": "nvidia/nemotron-3-super-120b-a12b",
+    "qwen/qwen3-235b-a22b": "qwen/qwen3-235b-a22b-2507",
+    "meta-llama/llama-3.1-405b-instruct": "meta-llama/llama-3.3-70b-instruct",
+}
+
+# Models / providers where temperature must not be sent (e.g. OpenAI o-series)
+_NO_TEMPERATURE_PREFIXES = (
+    "openai/o1",
+    "openai/o3",
+    "openai/o4",
+)
+
+# Non-reasoning models that reject the `reasoning` parameter or do not use it
+_NON_REASONING_PREFIXES = (
+    "openai/gpt-3.5",
+    "openai/gpt-4o",
+    "openai/gpt-4.1",
+    "openai/gpt-4-",
+    "openai/gpt-4:",
+    "meta-llama/",
+    "mistralai/mistral-large-24",
+    "mistralai/mistral-Large",
+    "mistralai/mistral-small-3",
+    "mistralai/mistral-nemo",
+    "mistralai/mixtral",
+    "microsoft/phi-4",
+    "cohere/command-r",
+    "cohere/command-a",
+    "deepseek/deepseek-chat-v3-0324",
+    "deepseek/deepseek-chat",
+    "qwen/qwen-2.5",
+    "qwen/qwen3-235b-a22b-2507",
+    "perplexity/sonar",
+)
+
+
+def resolve_model_id(model: Optional[str]) -> str:
+    """Resolve a model ID, upgrading retired/dead OpenRouter slugs automatically."""
+    if not model or not isinstance(model, str):
+        return DEFAULT_MODEL
+    cleaned = model.strip()
+    if not cleaned:
+        return DEFAULT_MODEL
+    if cleaned in LEGACY_MODEL_MAP:
+        return LEGACY_MODEL_MAP[cleaned]
+    return cleaned
+
+
+def _model_supports_temperature(model: str) -> bool:
+    lowered = (model or "").lower()
+    return not any(lowered.startswith(prefix) for prefix in _NO_TEMPERATURE_PREFIXES)
+
+
+def _model_supports_reasoning_param(model: str) -> bool:
+    lowered = (model or "").lower()
+    if lowered == "openai/gpt-4":
+        return False
+    if lowered in {"cohere/command-a-plus", "deepseek/deepseek-chat-v3.1", "perplexity/sonar-reasoning-pro", "perplexity/sonar-deep-research", "perplexity/sonar-pro-search"}:
+        return True
+    return not any(lowered.startswith(prefix) for prefix in _NON_REASONING_PREFIXES)
 
 # Discord replies are one or two sentences. Reasoning models will spend a
 # small max_tokens budget on hidden thinking and return an empty `content`,
@@ -238,6 +324,8 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 
     if not model:
         model = DEFAULT_MODEL
+    else:
+        model = resolve_model_id(model)
     return {
         "model": model,
         "system_prompt": actual_system_prompt,
@@ -249,7 +337,35 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 
 def _reasoning_request_rejected(error_text: str) -> bool:
     lowered = (error_text or "").lower()
-    return "reasoning" in lowered
+    return (
+        "reasoning" in lowered
+        or "thinking" in lowered
+        or "effort" in lowered
+        or "extra_forbidden" in lowered
+        or "unrecognized" in lowered
+        or "unsupported" in lowered
+        or "invalid_request" in lowered
+        or "unknown parameter" in lowered
+    )
+
+
+def _model_unavailable_error(status: int, error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    if status == 404:
+        return True
+    if status in {400, 402, 502, 503}:
+        return any(
+            cue in lowered
+            for cue in (
+                "not a valid model",
+                "no endpoints found",
+                "model not found",
+                "does not exist",
+                "unavailable",
+                "no available",
+            )
+        )
+    return False
 
 
 class LLMHandler:
@@ -290,19 +406,21 @@ class LLMHandler:
         if auto_router:
             effective_model = "openrouter/auto"
         elif model:
-            effective_model = model
+            effective_model = resolve_model_id(model)
         else:
-            effective_model = self.default_model
+            effective_model = resolve_model_id(self.default_model)
 
-        # Build request body. effort=none keeps the token budget on the
-        # visible sentence instead of an empty content field.
+        # Build request body. Only attach reasoning config on models that
+        # support it, and omit temperature for o-series reasoning models.
         body = {
             "model": effective_model,
             "messages": final_messages,
-            "temperature": temperature,
             "max_tokens": max_tokens,
-            "reasoning": {"effort": "none"},
         }
+        if _model_supports_temperature(effective_model):
+            body["temperature"] = temperature
+        if _model_supports_reasoning_param(effective_model):
+            body["reasoning"] = {"effort": "none"}
 
         # Add allowed_models filter for auto-router
         if auto_router and allowed_models:
@@ -316,26 +434,58 @@ class LLMHandler:
         }
 
         result = await self._post_chat(body, headers)
-        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
-            logger.warning("Provider rejected reasoning=none; retrying without it")
+        if result["status"] in {400, 422} and ("reasoning" in body or "temperature" in body):
+            logger.warning(
+                "Provider rejected parameters (status=%s); retrying with clean body",
+                result["status"],
+            )
             body = dict(body)
             body.pop("reasoning", None)
+            if not _model_supports_temperature(effective_model) or "temperature" in (result.get("error") or "").lower():
+                body.pop("temperature", None)
             body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
             result = await self._post_chat(body, headers)
         elif result["status"] in {429, 500, 502, 503, 504}:
             logger.warning(f"OpenRouter {result['status']}; retrying once")
             await asyncio.sleep(1.0)
             result = await self._post_chat(body, headers)
-        elif result["status"] == 200 and not result["text"]:
+
+        # If a specific model ID is dead/unavailable on OpenRouter, fall back
+        # automatically so the bot does not go completely silent.
+        if (result["status"] != 200 or not result["text"]) and _model_unavailable_error(
+            result["status"], result.get("error", "")
+        ):
+            fallback_model = (
+                "openrouter/free"
+                if str(model or effective_model).endswith(":free") or effective_model == "openrouter/free"
+                else "openrouter/auto"
+            )
+            if fallback_model != effective_model:
+                logger.warning(
+                    "Model %s unavailable (status=%s); falling back to %s",
+                    effective_model,
+                    result["status"],
+                    fallback_model,
+                )
+                fallback_body = {
+                    "model": fallback_model,
+                    "messages": final_messages,
+                    "temperature": temperature,
+                    "max_tokens": max(int(max_tokens or 0), 400),
+                }
+                result = await self._post_chat(fallback_body, headers)
+
+        if result["status"] == 200 and not result["text"]:
             # Tokens were spent before a sentence existed (usually reasoning
-            # or a cut-off <think> block). Give the answer a larger budget.
+            # or a cut-off <think> block). Give the answer a larger budget
+            # without forcing reasoning=none so mandatory-thinking models can finish.
             logger.warning(
                 "OpenRouter returned no visible reply (finish_reason=%s); retrying",
                 result.get("finish_reason"),
             )
             body = dict(body)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
-            body["reasoning"] = {"effort": "minimal"}
+            body.pop("reasoning", None)
+            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 1024)
             result = await self._post_chat(body, headers)
 
         if result["status"] != 200 or not result["text"]:
@@ -406,7 +556,7 @@ class LLMHandler:
 
     # ── OpenRouter Image Generation (via modalities) ──
 
-    async def generate_image_openrouter(self, prompt: str, model: str = "openai/gpt-4o",
+    async def generate_image_openrouter(self, prompt: str, model: str = "google/gemini-2.5-flash-image",
                                         size: str = "1024x1024",
                                         reference_data_url: str = None) -> str:
         """
@@ -747,7 +897,7 @@ async def parse_settings_command(prompt: str):
         "Return ONLY a JSON object with exactly two fields: \"key\" and \"value\". "
         "No other text, no markdown formatting.\n\n"
         "Valid setting keys and their expected value types:\n"
-        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
+        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4.5\", \"google/gemini-2.5-flash\", \"openrouter/free\")\n"
         "- response_enabled: boolean\n"
         "- cooldown_seconds: integer\n"
         "- trigger_on_mention: boolean\n"
