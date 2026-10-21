@@ -5,9 +5,13 @@ import unittest
 from types import SimpleNamespace
 
 from engine.database import Database
+from utils import prefix_command_allowed, prefix_owner_ids
 from trivia import (
+    BUSY,
     EXAMPLE_QUESTIONS,
     HELP_TEXT,
+    NONE_RUNNING,
+    PUBLIC_HELP_TEXT,
     MAX_BANK,
     TriviaError,
     TriviaSession,
@@ -84,10 +88,19 @@ class TriviaGradeTests(unittest.TestCase):
             "open": 5,
         })
         self.assertLess(len(HELP_TEXT), 1900)
+        self.assertLess(len(PUBLIC_HELP_TEXT), 1900)
         self.assertIn("!trivia add mc", HELP_TEXT)
         self.assertIn("!trivia add tf", HELP_TEXT)
         self.assertIn("!trivia add open", HELP_TEXT)
         self.assertIn("loadexamples", HELP_TEXT)
+        for public_text in (
+            PUBLIC_HELP_TEXT,
+            empty_bank_message(),
+            start_announcement(10, 15, 10),
+            BUSY,
+            NONE_RUNNING,
+        ):
+            self.assertNotIn("!", public_text)
         self.assertEqual(MAX_BANK, 200)
 
     def test_examples_grade_their_own_answers(self):
@@ -206,7 +219,8 @@ class TriviaGradeTests(unittest.TestCase):
         self.assertEqual(find_duplicate(bank, "  What is the capital of France?? ")["id"], 4)
         self.assertIsNone(find_duplicate(bank, "What is the capital of Spain?"))
         self.assertTrue(chat_should_stay_quiet("  !Trivia start", False, "!"))
-        self.assertFalse(chat_should_stay_quiet("!triviaadd", False, "!"))
+        self.assertTrue(chat_should_stay_quiet("!triviaadd", False, "!"))
+        self.assertFalse(chat_should_stay_quiet("! wow", False, "!"))
         self.assertFalse(chat_should_stay_quiet("hello", False, "!"))
         self.assertTrue(chat_should_stay_quiet("hello", True, "!"))
         self.assertTrue(chat_should_stay_quiet("?trivia", False, "?"))
@@ -358,6 +372,23 @@ class TriviaRoundFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Ada", texts[-1])
 
 
+class PrefixPrivacyTests(unittest.TestCase):
+    def test_only_the_bot_owner_can_use_prefix_commands(self):
+        self.assertFalse(prefix_command_allowed(5, []))
+        self.assertFalse(prefix_command_allowed(5, [9]))
+        self.assertTrue(prefix_command_allowed(9, [9]))
+        self.assertTrue(prefix_command_allowed("9", ["9"]))
+        bot = SimpleNamespace(
+            owner_id=None,
+            owner_ids=[],
+            application=SimpleNamespace(owner=SimpleNamespace(id=42), team=None),
+        )
+        ids = [owner_id for owner_id in prefix_owner_ids(bot) if owner_id != 7]
+        self.assertIn(42, ids)
+        self.assertTrue(prefix_command_allowed(42, ids))
+        self.assertFalse(prefix_command_allowed(7, ids))
+
+
 class TriviaCommandRegistrationTests(unittest.TestCase):
     def test_prefix_and_slash_commands_register(self):
         import discord
@@ -390,6 +421,9 @@ class TriviaCommandRegistrationTests(unittest.TestCase):
         with open("bot.py", encoding="utf-8") as handle:
             bot_source = handle.read()
         self.assertIn('load_extension("cogs.trivia")', bot_source)
+        self.assertIn("message.delete()", bot_source)
+        self.assertIn("prefix_command_allowed", bot_source)
+        self.assertIn("PrivatePrefixContext", bot_source)
 
 
 if __name__ == "__main__":

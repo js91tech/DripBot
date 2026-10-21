@@ -53,8 +53,8 @@ DEFAULT_ROUND = 10
 MAX_ROUND = 50
 
 NOT_READY = "Trivia isn't ready yet. Try again in a few seconds."
-BUSY = "A trivia round is already running in this channel. `!trivia stop` ends it."
-NONE_RUNNING = "No trivia round is running here. Start one with `!trivia start`."
+BUSY = "A trivia round is already running in this channel. `/trivia stop` ends it."
+NONE_RUNNING = "No trivia round is running here. Start one with `/trivia start`."
 DENIED = "Only the person who started this round, or a server admin, can do that."
 BETWEEN = "The next question is on the way."
 
@@ -139,6 +139,31 @@ Open ended. Extra accepted answers are optional:
 `!trivia clear confirm` — delete every question in this server
 
 The same actions are available as `/trivia`.
+"""
+
+PUBLIC_HELP_TEXT = """**Trivia mode**
+Anyone can play. Server admins (Manage Server) edit the question bank.
+
+**Play**
+`/trivia start` — up to 10 questions
+`/trivia score` — scores for this round
+`/trivia skip` — skip (host or admin)
+`/trivia stop` — end the round (host or admin)
+`/trivia count` — how many questions are saved
+
+Type your answer in chat. The first correct answer scores.
+Multiple choice and true/false are worth 1 point. Open ended is worth 2.
+
+**Admins — add questions**
+`/trivia add` — multiple choice, true/false, or open ended.
+For multiple choice, separate choices with `|`.
+The answer is a letter or the exact choice.
+
+**Admins — bank**
+`/trivia list` — view questions and answers (only you can see it)
+`/trivia remove` — delete one question by id
+`/trivia loadexamples` — add 5 multiple choice, 5 true/false, and 5 open ended
+`/trivia clear` — delete every question in this server
 """
 
 
@@ -627,12 +652,9 @@ def format_bank(questions):
 def empty_bank_message():
     return (
         "This server doesn't have trivia questions yet.\n"
-        "An admin can add some:\n"
-        "`!trivia add mc What is the capital of France? | Paris | London | Berlin | Madrid | a`\n"
-        "`!trivia add tf Octopuses have three hearts | true`\n"
-        "`!trivia add open Who wrote Romeo and Juliet? | Shakespeare | William Shakespeare`\n"
-        "Or load a sample pack of 5 multiple choice, 5 true/false, and 5 open ended:\n"
-        "`!trivia loadexamples`"
+        "An admin can add some with `/trivia add`, "
+        "or load a sample pack of 5 multiple choice, 5 true/false, and 5 open ended "
+        "with `/trivia loadexamples`."
     )
 
 
@@ -645,19 +667,19 @@ def start_announcement(playing, bank_size, requested):
         lines.append(f"{bank_size} saved. This round draws {playing}.")
     lines.append("First correct answer scores. Multiple choice and true/false are 1 point. Open ended is 2.")
     lines.append("Type your answer in chat. I'll stay out of the chat until the round ends.")
-    lines.append("`!trivia stop` ends the round.")
+    lines.append("`/trivia stop` ends the round.")
     return "\n".join(lines)
 
 
 def examples_loaded_message(added, skipped):
     if added <= 0:
-        return "The sample pack is already in this server. Start a round with `!trivia start`."
+        return "The sample pack is already in this server. Start a round with `/trivia start`."
     word = "question" if added == 1 else "questions"
     return (
         f"Loaded the sample pack: **{added}** new {word}. "
         f"Skipped **{skipped}** already saved.\n"
         "The pack is 5 multiple choice, 5 true/false, and 5 open ended. "
-        "Start a round with `!trivia start`."
+        "Start a round with `/trivia start`."
     )
 
 
@@ -718,12 +740,15 @@ def find_duplicate(questions, question_text):
 
 
 def chat_should_stay_quiet(content, trivia_active, prefix="!"):
-    """Keep the chat personality from answering trivia commands or a live round."""
+    """Keep the chat personality from answering a live round or a prefix command."""
     if trivia_active:
         return True
-    text = (content or "").lstrip().lower()
-    head = f"{(prefix or '!').lower()}trivia"
-    return text == head or text.startswith(head + " ")
+    text = (content or "").lstrip()
+    pref = prefix or "!"
+    if len(text) < len(pref) or not text.lower().startswith(pref.lower()):
+        return False
+    rest = text[len(pref):]
+    return bool(rest) and rest[:1].isalnum()
 
 
 def should_cancel_task(task, current_task):
