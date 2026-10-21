@@ -24,12 +24,17 @@ from urllib.parse import quote
 
 logger = logging.getLogger("dripsletongue.llm")
 
+from config.models import (
+    DEFAULT_MODEL,
+    FALLBACK_MODEL,
+    is_reasoning_model,
+    normalize_model_id,
+    supports_temperature,
+)
+
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
-
-# Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
 
 # Discord replies are one or two sentences. Reasoning models will spend a
 # small max_tokens budget on hidden thinking and return an empty `content`,
@@ -238,6 +243,10 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 
     if not model:
         model = DEFAULT_MODEL
+    # Guilds saved before a model was retired still hold the dead ID.
+    model = normalize_model_id(model)
+    if allowed:
+        allowed = [normalize_model_id(entry) for entry in allowed]
     return {
         "model": model,
         "system_prompt": actual_system_prompt,
@@ -250,6 +259,32 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 def _reasoning_request_rejected(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "reasoning" in lowered
+
+
+def _unsupported_param(error_text: str, body: dict):
+    """Name of a body field a provider rejected with a 400, or None.
+
+    Providers phrase this differently ("temperature is not supported",
+    "Unsupported parameter: reasoning", ...), so match on the field name
+    appearing in the error rather than one provider's exact wording.
+    GPT-4o accepts every field we send, which is why this only ever bit
+    the other models.
+    """
+    lowered = (error_text or "").lower()
+    if not lowered:
+        return None
+    for param in ("temperature", "reasoning", "max_tokens", "max_completion_tokens"):
+        if param in body and param in lowered:
+            return param
+    return None
+
+
+# Reasoning models spend completion tokens thinking before they write
+# anything visible, so a Discord-sized budget returns empty content.
+REASONING_MIN_TOKENS = 1024
+# Statuses where the requested model itself is the problem (dead ID, no
+# credits, rate-limited, provider down) and a fallback model can answer.
+_FALLBACK_STATUSES = {402, 404, 429, 500, 502, 503, 504}
 
 
 class LLMHandler:
@@ -286,27 +321,41 @@ class LLMHandler:
             final_messages.append({"role": "system", "content": system_prompt})
         final_messages.extend(flatten_message(msg) for msg in messages)
 
-        # Determine model
+        # Determine model (remapping IDs OpenRouter has retired).
         if auto_router:
             effective_model = "openrouter/auto"
         elif model:
-            effective_model = model
+            effective_model = normalize_model_id(model)
         else:
             effective_model = self.default_model
 
-        # Build request body. effort=none keeps the token budget on the
-        # visible sentence instead of an empty content field.
+        # Build request body. Only send optional fields the model accepts:
+        # the o-series rejects `temperature`, and non-reasoning providers
+        # may reject `reasoning` — sending either unconditionally made
+        # every model except tolerant ones like GPT-4o fail with a 400.
+        reasoningish = auto_router or is_reasoning_model(effective_model)
         body = {
             "model": effective_model,
             "messages": final_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "reasoning": {"effort": "none"},
+            "max_tokens": (
+                max(max_tokens, REASONING_MIN_TOKENS) if reasoningish else max_tokens
+            ),
         }
+        if auto_router or supports_temperature(effective_model):
+            body["temperature"] = temperature
+        if reasoningish:
+            # effort=none keeps the token budget on the visible sentence
+            # instead of an empty content field.
+            body["reasoning"] = {"effort": "none"}
 
-        # Add allowed_models filter for auto-router
+        # Restrict the auto-router via its plugin, not a top-level
+        # `allowed_models` field (not a valid chat-completions field;
+        # strict providers 400 on it).
         if auto_router and allowed_models:
-            body["allowed_models"] = allowed_models
+            body["plugins"] = [{
+                "id": "auto-router",
+                "allowed_models": [normalize_model_id(m) for m in allowed_models],
+            }]
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -316,17 +365,28 @@ class LLMHandler:
         }
 
         result = await self._post_chat(body, headers)
-        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
-            logger.warning("Provider rejected reasoning=none; retrying without it")
+
+        # Repair provider 400s by dropping whichever field it rejected,
+        # not just `reasoning`. Each repair removes a field, so this ends.
+        repaired = set()
+        while result["status"] == 400:
+            param = _unsupported_param(result["error"], body)
+            if param is None or param in repaired:
+                break
+            repaired.add(param)
+            logger.warning("Provider rejected %s; retrying without it", param)
             body = dict(body)
-            body.pop("reasoning", None)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
+            body.pop(param, None)
+            if param in {"reasoning", "max_tokens", "max_completion_tokens"}:
+                body["max_tokens"] = max(int(body.get("max_tokens") or 0), REASONING_MIN_TOKENS)
             result = await self._post_chat(body, headers)
-        elif result["status"] in {429, 500, 502, 503, 504}:
+
+        if result["status"] in {429, 500, 502, 503, 504}:
             logger.warning(f"OpenRouter {result['status']}; retrying once")
             await asyncio.sleep(1.0)
             result = await self._post_chat(body, headers)
-        elif result["status"] == 200 and not result["text"]:
+
+        if result["status"] == 200 and not result["text"]:
             # Tokens were spent before a sentence existed (usually reasoning
             # or a cut-off <think> block). Give the answer a larger budget.
             logger.warning(
@@ -334,8 +394,27 @@ class LLMHandler:
                 result.get("finish_reason"),
             )
             body = dict(body)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
-            body["reasoning"] = {"effort": "minimal"}
+            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, REASONING_MIN_TOKENS)
+            if "reasoning" in body:
+                body["reasoning"] = {"effort": "minimal"}
+            result = await self._post_chat(body, headers)
+
+        # The requested model is unusable (retired ID that slipped past
+        # the alias map, out of credits, rate-limited, provider down).
+        # Answer with the free router instead of sending nothing — the
+        # old behaviour was typing, then silence, for every such model.
+        if (
+            (result["status"] in _FALLBACK_STATUSES or result["status"] == 400)
+            and not auto_router
+            and effective_model != FALLBACK_MODEL
+        ):
+            logger.warning(
+                "Model %s failed (status %s); falling back to %s",
+                effective_model, result["status"], FALLBACK_MODEL,
+            )
+            body = dict(body)
+            body["model"] = FALLBACK_MODEL
+            body.pop("plugins", None)
             result = await self._post_chat(body, headers)
 
         if result["status"] != 200 or not result["text"]:
@@ -747,7 +826,7 @@ async def parse_settings_command(prompt: str):
         "Return ONLY a JSON object with exactly two fields: \"key\" and \"value\". "
         "No other text, no markdown formatting.\n\n"
         "Valid setting keys and their expected value types:\n"
-        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
+        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4.5\")\n"
         "- response_enabled: boolean\n"
         "- cooldown_seconds: integer\n"
         "- trigger_on_mention: boolean\n"

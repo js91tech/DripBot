@@ -3,6 +3,7 @@ from config.default_settings import (
     build_custom_personality_settings_update,
     build_personality_settings_update,
 )
+from config.models import normalize_model_id
 import copy
 
 
@@ -29,7 +30,14 @@ class SettingsManager:
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
                 self.cache[guild_id] = full_settings
-                if self._normalize_personality_settings(self.cache[guild_id]):
+                changed = self._normalize_personality_settings(self.cache[guild_id])
+                # Heal model IDs OpenRouter has retired since they were saved.
+                for key in ("llm_model", "model"):
+                    healed = normalize_model_id(self.cache[guild_id].get(key))
+                    if healed and healed != self.cache[guild_id].get(key):
+                        self.cache[guild_id][key] = healed
+                        changed = True
+                if changed:
                     await self.db.save_settings(guild_id, self.cache[guild_id])
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)

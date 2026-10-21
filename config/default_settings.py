@@ -1,6 +1,8 @@
 # config/default_settings.py
 # Dripsletongue — Default settings for new guilds
 
+from config.models import DEFAULT_MODEL
+
 def is_bool(val):
     return str(val).lower() in ["true", "false", "yes", "no", "on", "off", "1", "0"]
 
@@ -524,8 +526,8 @@ DEFAULT_SETTINGS = {
     "gif_chance": 0.10,
 
     # ── LLM Model ──
-    "llm_model": "meta-llama/llama-4-maverick:free",
-    "model": "meta-llama/llama-4-maverick:free",  # Dashboard API compat (synced with llm_model)
+    "llm_model": DEFAULT_MODEL,
+    "model": DEFAULT_MODEL,  # Dashboard API compat (synced with llm_model)
 
     # ── Image Generation ──
     "image_model": "zai-sidecar",
