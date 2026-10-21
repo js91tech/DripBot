@@ -2,17 +2,20 @@ import aiosqlite
 import json
 import os
 import asyncio
+import time
 
 
 class Database:
-    def __init__(self):
-        self.db_path = "data/bot.db"
+    def __init__(self, db_path="data/bot.db"):
+        self.db_path = db_path
         self.conn = None
         self.queue = asyncio.Queue()
         self._worker_task = None
 
     async def init(self):
-        os.makedirs("data", exist_ok=True)
+        parent = os.path.dirname(self.db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         self.conn = await aiosqlite.connect(self.db_path)
         await self.conn.execute("PRAGMA journal_mode=WAL")
         await self.conn.execute(
@@ -51,6 +54,21 @@ class Database:
                                     channel_id INTEGER,
                                     message TEXT,
                                     trigger_time REAL)"""
+        )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_questions (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    guild_id INTEGER NOT NULL,
+                                    kind TEXT NOT NULL,
+                                    question TEXT NOT NULL,
+                                    choices_json TEXT,
+                                    answer TEXT NOT NULL,
+                                    accepted_json TEXT,
+                                    added_by INTEGER,
+                                    created_at REAL)"""
+        )
+        await self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trivia_guild ON trivia_questions (guild_id)"
         )
         await self.conn.commit()
         self._worker_task = asyncio.create_task(self._write_worker())
@@ -125,6 +143,9 @@ class Database:
         await self.queue.put(("DELETE FROM memories WHERE guild_id = ?", (guild_id,)))
         await self.queue.put(
             ("DELETE FROM consolidated_memories WHERE guild_id = ?", (guild_id,))
+        )
+        await self.queue.put(
+            ("DELETE FROM trivia_questions WHERE guild_id = ?", (guild_id,))
         )
 
     async def add_memory(self, guild_id, user_id, note, limit: int = 12):
@@ -206,8 +227,83 @@ class Database:
     async def delete_reminder(self, reminder_id):
         await self.queue.put(("DELETE FROM reminders WHERE id = ?", (reminder_id,)))
 
+    def _trivia_from_row(self, row):
+        try:
+            choices = json.loads(row[4] or "[]")
+        except json.JSONDecodeError:
+            choices = []
+        try:
+            accepted = json.loads(row[6] or "[]")
+        except json.JSONDecodeError:
+            accepted = []
+        if not isinstance(choices, list):
+            choices = []
+        if not isinstance(accepted, list):
+            accepted = []
+        return {
+            "id": row[0],
+            "guild_id": row[1],
+            "kind": row[2],
+            "question": row[3],
+            "choices": choices,
+            "answer": row[5],
+            "accepted": accepted,
+            "added_by": row[7],
+        }
+
+    async def add_trivia_question(self, guild_id, kind, question, choices, answer, accepted, added_by):
+        cursor = await self.conn.execute(
+            """INSERT INTO trivia_questions
+               (guild_id, kind, question, choices_json, answer, accepted_json, added_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                int(guild_id),
+                kind,
+                question,
+                json.dumps(list(choices or [])),
+                answer,
+                json.dumps(list(accepted or [])),
+                added_by,
+                time.time(),
+            ),
+        )
+        await self.conn.commit()
+        return cursor.lastrowid
+
+    async def list_trivia_questions(self, guild_id):
+        cursor = await self.conn.execute(
+            """SELECT id, guild_id, kind, question, choices_json, answer, accepted_json, added_by
+               FROM trivia_questions WHERE guild_id = ? ORDER BY id ASC""",
+            (int(guild_id),),
+        )
+        rows = await cursor.fetchall()
+        return [self._trivia_from_row(row) for row in rows]
+
+    async def delete_trivia_question(self, guild_id, question_id):
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(question_id)),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def clear_trivia_questions(self, guild_id):
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ?",
+            (int(guild_id),),
+        )
+        await self.conn.commit()
+        return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+
     async def close(self):
-        if self._worker_task:
-            self._worker_task.cancel()
-        if self.conn:
+        task = self._worker_task
+        self._worker_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        if self.conn is not None:
             await self.conn.close()
+            self.conn = None

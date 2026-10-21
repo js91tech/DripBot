@@ -32,6 +32,7 @@ from people import (
     people_prompt_block,
     profile_from_image_subject,
 )
+from trivia import chat_should_stay_quiet
 
 DR_UMAR_PRESET_ID = "dr_umar"
 CRIP_MAC_PRESET_ID = "crip_mac"
@@ -734,6 +735,17 @@ class Chat(commands.Cog):
             )
         os.environ["OWNER_TARGET_CHANNEL_ID"] = str(channel.id)
 
+    def _trivia_round_active(self, channel_id):
+        getter = getattr(self.bot, "get_cog", None)
+        trivia = getter("Trivia") if getter is not None else None
+        checker = getattr(trivia, "is_channel_active", None)
+        if checker is None:
+            return False
+        try:
+            return bool(checker(channel_id))
+        except Exception:
+            return False
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         sendable = [
@@ -894,6 +906,11 @@ class Chat(commands.Cog):
         if is_bot and not settings.get("learn_from_bots", False):
             return
         if is_bot or (message.content or "").startswith("/"):
+            return
+        prefix = getattr(self.bot, "command_prefix", "!")
+        if not isinstance(prefix, str) or not prefix:
+            prefix = "!"
+        if chat_should_stay_quiet(message.content, self._trivia_round_active(channel_id), prefix):
             return
         if not settings.get("response_enabled", True):
             return
