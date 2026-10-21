@@ -91,6 +91,7 @@ if sidecar_process:
 from engine.database import Database
 from config.settings_manager import SettingsManager
 from config.default_settings import DEFAULTS
+from model_catalog import DEFAULT_MODEL
 
 db = Database()
 settings_manager = SettingsManager(db)
@@ -213,7 +214,7 @@ async def ping(ctx):
 async def show_model(ctx):
     guild_id = ctx.guild.id if ctx.guild else 0
     settings = await settings_manager.get_settings(guild_id)
-    model = settings.get("llm_model") or settings.get("model", "meta-llama/llama-4-maverick:free")
+    model = settings.get("llm_model") or settings.get("model", DEFAULT_MODEL)
     await ctx.send(f"Current model: `{model}`")
 
 

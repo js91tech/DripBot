@@ -8,6 +8,7 @@ from config.default_settings import (
     build_personality_settings_update,
     normalize_personality_preset,
 )
+from model_catalog import FREE_MODELS, PAID_MODELS
 from utils import sanitize_message
 from llm import generate_image, generate_llm_response, parse_settings_command
 from people import (
@@ -19,6 +20,15 @@ from people import (
 from people_clone import clone_user_from_message
 import io
 import json
+
+
+def _model_choices(models, suffix=""):
+    """Slash-command choices (Discord caps these at 25) built from the model catalog."""
+    def label(model):
+        name = model.split("/", 1)[-1].replace(":free", "")
+        return f"Auto (any free model){suffix}" if model == "openrouter/free" else f"{name}{suffix}"
+
+    return [app_commands.Choice(name=label(model)[:100], value=model) for model in models[:25]]
 
 
 def _personality_choices():
@@ -154,18 +164,7 @@ class SettingsCog(commands.Cog):
 
     @group.command(name="modelfree", description="Switch to a free LLM model")
     @app_commands.describe(model="Choose a free LLM model")
-    @app_commands.choices(model=[
-        app_commands.Choice(name="Llama 4 Maverick (Free)", value="meta-llama/llama-4-maverick:free"),
-        app_commands.Choice(name="Gemma 3 27B (Free)", value="google/gemma-3-27b-it:free"),
-        app_commands.Choice(name="Qwen3 235B (Free)", value="qwen/qwen3-235b-a22b:free"),
-        app_commands.Choice(name="Phi-4 Reasoning+ (Free)", value="microsoft/phi-4-reasoning-plus:free"),
-        app_commands.Choice(name="DeepSeek R1 (Free)", value="deepseek/deepseek-r1:free"),
-        app_commands.Choice(name="Nemotron 70B (Free)", value="nvidia/llama-3.1-nemotron-70b-instruct:free"),
-        app_commands.Choice(name="Gemma 3 12B (Free)", value="google/gemma-3-12b-it:free"),
-        app_commands.Choice(name="Mistral Small 3.1 (Free)", value="mistralai/mistral-small-3.1-24b-instruct:free"),
-        app_commands.Choice(name="Qwen3 32B (Free)", value="qwen/qwen3-32b:free"),
-        app_commands.Choice(name="Llama 3.3 70B (Free)", value="meta-llama/llama-3.3-70b-instruct:free"),
-    ])
+    @app_commands.choices(model=_model_choices(FREE_MODELS, " (Free)"))
     async def modelfree_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
         await self.settings_manager.set_setting(interaction.guild.id, "model", model.value)
@@ -176,22 +175,7 @@ class SettingsCog(commands.Cog):
 
     @group.command(name="modelpaid", description="Switch to a paid LLM model")
     @app_commands.describe(model="Choose a paid LLM model")
-    @app_commands.choices(model=[
-        app_commands.Choice(name="GPT-4o", value="openai/gpt-4o"),
-        app_commands.Choice(name="GPT-4.1", value="openai/gpt-4.1"),
-        app_commands.Choice(name="Claude Sonnet 4", value="anthropic/claude-sonnet-4"),
-        app_commands.Choice(name="Claude Opus 4", value="anthropic/claude-opus-4"),
-        app_commands.Choice(name="Gemini 2.5 Pro", value="google/gemini-2.5-pro"),
-        app_commands.Choice(name="Gemini 2.5 Flash", value="google/gemini-2.5-flash"),
-        app_commands.Choice(name="Llama 4 Maverick", value="meta-llama/llama-4-maverick"),
-        app_commands.Choice(name="DeepSeek Chat V3", value="deepseek/deepseek-chat-v3-0324"),
-        app_commands.Choice(name="Mistral Large", value="mistralai/mistral-large-2411"),
-        app_commands.Choice(name="Grok 3", value="x-ai/grok-3"),
-        app_commands.Choice(name="Grok 3 Mini", value="x-ai/grok-3-mini"),
-        app_commands.Choice(name="o3-mini", value="openai/o3-mini"),
-        app_commands.Choice(name="o4-mini", value="openai/o4-mini"),
-        app_commands.Choice(name="Claude Haiku 3.5", value="anthropic/claude-haiku-3.5"),
-    ])
+    @app_commands.choices(model=_model_choices(PAID_MODELS))
     async def modelpaid_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
         await self.settings_manager.set_setting(interaction.guild.id, "llm_model", model.value)
         await self.settings_manager.set_setting(interaction.guild.id, "model", model.value)
@@ -327,9 +311,7 @@ class SettingsCog(commands.Cog):
         app_commands.Choice(name="Z.ai Sidecar (Free)", value="zai-sidecar"),
         app_commands.Choice(name="GPT-4o (Best Quality)", value="openai/gpt-4o"),
         app_commands.Choice(name="GPT-4o Mini (Cheaper)", value="openai/gpt-4o-mini"),
-        app_commands.Choice(name="Claude 3.5 Sonnet", value="anthropic/claude-3.5-sonnet"),
-        app_commands.Choice(name="Claude 3.7 Sonnet", value="anthropic/claude-3.7-sonnet"),
-        app_commands.Choice(name="Gemini 2.0 Flash (Free)", value="google/gemini-2.0-flash-exp:free"),
+        app_commands.Choice(name="Gemini 2.5 Flash Image", value="google/gemini-2.5-flash-image"),
         app_commands.Choice(name="Pollinations (Always Free)", value="pollinations"),
     ])
     async def imgmodel_switch(self, interaction: discord.Interaction, model: app_commands.Choice[str]):
@@ -473,7 +455,7 @@ class SettingsCog(commands.Cog):
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": roast_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+                            "model": settings.get("llm_model", DEFAULT_MODEL)})
         response = await generate_llm_response(roast_prompt, chat_history)
         if response:
             await interaction.followup.send(f"**Roasting {user.display_name}:** {sanitize_message(response)}")
@@ -507,7 +489,7 @@ class SettingsCog(commands.Cog):
         )
         chat_history = [{"role": "user", "content": "\n".join(user_msgs)}]
         chat_history.insert(0, {"role": "system", "content": mimic_prompt,
-                            "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free")})
+                            "model": settings.get("llm_model", DEFAULT_MODEL)})
         try:
             response = await generate_llm_response(mimic_prompt, chat_history)
             if response:

@@ -22,14 +22,13 @@ import re
 from typing import Optional, List
 from urllib.parse import quote
 
+from model_catalog import DEFAULT_MODEL, FALLBACK_MODEL, canonical_model
+
 logger = logging.getLogger("dripsletongue.llm")
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
-
-# Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
 
 # Discord replies are one or two sentences. Reasoning models will spend a
 # small max_tokens budget on hidden thinking and return an empty `content`,
@@ -236,8 +235,7 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
             continue
         clean_messages.append(flatten_message(msg))
 
-    if not model:
-        model = DEFAULT_MODEL
+    model = canonical_model(model)
     return {
         "model": model,
         "system_prompt": actual_system_prompt,
@@ -250,6 +248,20 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 def _reasoning_request_rejected(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "reasoning" in lowered
+
+
+def _model_unavailable(status: int, error_text: str) -> bool:
+    """True when the chosen model slug is retired/invalid or the account can't pay for it."""
+    if status in {402, 404}:
+        return True
+    if status == 400:
+        lowered = (error_text or "").lower()
+        return (
+            "not a valid model" in lowered
+            or "no endpoints" in lowered
+            or ("model" in lowered and "not found" in lowered)
+        )
+    return False
 
 
 class LLMHandler:
@@ -290,7 +302,7 @@ class LLMHandler:
         if auto_router:
             effective_model = "openrouter/auto"
         elif model:
-            effective_model = model
+            effective_model = canonical_model(model)
         else:
             effective_model = self.default_model
 
@@ -316,6 +328,18 @@ class LLMHandler:
         }
 
         result = await self._post_chat(body, headers)
+        if _model_unavailable(result["status"], result["error"]) and effective_model != FALLBACK_MODEL:
+            logger.warning(
+                "Model %s is unavailable on OpenRouter (%s); falling back to %s. "
+                "Pick a current model in /botsettings modelfree or modelpaid.",
+                effective_model,
+                result["status"],
+                FALLBACK_MODEL,
+            )
+            body = dict(body)
+            body["model"] = FALLBACK_MODEL
+            body.pop("allowed_models", None)
+            result = await self._post_chat(body, headers)
         if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
             logger.warning("Provider rejected reasoning=none; retrying without it")
             body = dict(body)

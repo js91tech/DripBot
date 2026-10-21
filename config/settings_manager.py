@@ -5,6 +5,8 @@ from config.default_settings import (
 )
 import copy
 
+from model_catalog import canonical_model
+
 
 class SettingsManager:
     def __init__(self, db):
@@ -29,12 +31,25 @@ class SettingsManager:
                 full_settings = copy.deepcopy(DEFAULTS)
                 full_settings.update(db_settings)
                 self.cache[guild_id] = full_settings
-                if self._normalize_personality_settings(self.cache[guild_id]):
+                changed = self._normalize_personality_settings(self.cache[guild_id])
+                changed = self._normalize_model_settings(self.cache[guild_id]) or changed
+                if changed:
                     await self.db.save_settings(guild_id, self.cache[guild_id])
             else:
                 self.cache[guild_id] = copy.deepcopy(DEFAULTS)
                 await self.db.save_settings(guild_id, self.cache[guild_id])
         return self.cache[guild_id]
+
+    def _normalize_model_settings(self, settings):
+        """Swap retired OpenRouter slugs saved in the DB for their live replacements."""
+        changed = False
+        for key in ("llm_model", "model"):
+            current = settings.get(key)
+            replacement = canonical_model(current)
+            if current and replacement != current:
+                settings[key] = replacement
+                changed = True
+        return changed
 
     def _normalize_personality_settings(self, settings):
         """Repair legacy or manually-set personality values into the supported shape."""
