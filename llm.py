@@ -22,14 +22,23 @@ import re
 from typing import Optional, List
 from urllib.parse import quote
 
+from config.models import DEFAULT_IMAGE_MODEL, DEFAULT_MODEL, resolve_image_model, resolve_model
+
 logger = logging.getLogger("dripsletongue.llm")
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
 
-# Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
+# Every current free model and most new paid ones think before answering.
+# When a model refuses to skip that, a 60-token Discord budget is gone before
+# the first visible word, so those models get at least this many tokens.
+REASONING_MIN_TOKENS = 1024
+_TRANSIENT_STATUSES = {408, 429, 500, 502, 503, 504}
+
+# Models seen thinking despite effort=none (or rejecting it). Later requests
+# start with a reasoning-sized budget instead of failing once first.
+_thinking_models = set()
 
 # Discord replies are one or two sentences. Reasoning models will spend a
 # small max_tokens budget on hidden thinking and return an empty `content`,
@@ -236,10 +245,8 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
             continue
         clean_messages.append(flatten_message(msg))
 
-    if not model:
-        model = DEFAULT_MODEL
     return {
-        "model": model,
+        "model": resolve_model(model),
         "system_prompt": actual_system_prompt,
         "messages": clean_messages,
         "auto_router": use_auto,
@@ -250,6 +257,27 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 def _reasoning_request_rejected(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "reasoning" in lowered
+
+
+def _model_unavailable(status: int, error_text: str) -> bool:
+    """True when OpenRouter no longer serves the requested model ID."""
+    lowered = (error_text or "").lower()
+    if "data policy" in lowered:
+        return False
+    if "not a valid model" in lowered or "model not found" in lowered:
+        return True
+    return status == 404 and "no endpoints found for" in lowered
+
+
+def _give_reasoning_room(body: dict) -> None:
+    """Budget for a model that thinks no matter what effort it is asked for."""
+    body["max_tokens"] = max(int(body.get("max_tokens") or 0), REASONING_MIN_TOKENS)
+    if "reasoning" in body:
+        body["reasoning"] = {"effort": "low"}
+
+
+def _privacy_blocked(error_text: str) -> bool:
+    return "data policy" in (error_text or "").lower()
 
 
 class LLMHandler:
@@ -286,16 +314,13 @@ class LLMHandler:
             final_messages.append({"role": "system", "content": system_prompt})
         final_messages.extend(flatten_message(msg) for msg in messages)
 
-        # Determine model
         if auto_router:
             effective_model = "openrouter/auto"
-        elif model:
-            effective_model = model
         else:
-            effective_model = self.default_model
+            effective_model = resolve_model(model or self.default_model)
 
-        # Build request body. effort=none keeps the token budget on the
-        # visible sentence instead of an empty content field.
+        # effort=none keeps the token budget on the visible sentence instead
+        # of an empty content field. Models without reasoning ignore it.
         body = {
             "model": effective_model,
             "messages": final_messages,
@@ -303,8 +328,9 @@ class LLMHandler:
             "max_tokens": max_tokens,
             "reasoning": {"effort": "none"},
         }
+        if effective_model in _thinking_models:
+            _give_reasoning_room(body)
 
-        # Add allowed_models filter for auto-router
         if auto_router and allowed_models:
             body["allowed_models"] = allowed_models
 
@@ -315,32 +341,8 @@ class LLMHandler:
             "X-Title": "Dripsletongue Bot",
         }
 
-        result = await self._post_chat(body, headers)
-        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
-            logger.warning("Provider rejected reasoning=none; retrying without it")
-            body = dict(body)
-            body.pop("reasoning", None)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
-            result = await self._post_chat(body, headers)
-        elif result["status"] in {429, 500, 502, 503, 504}:
-            logger.warning(f"OpenRouter {result['status']}; retrying once")
-            await asyncio.sleep(1.0)
-            result = await self._post_chat(body, headers)
-        elif result["status"] == 200 and not result["text"]:
-            # Tokens were spent before a sentence existed (usually reasoning
-            # or a cut-off <think> block). Give the answer a larger budget.
-            logger.warning(
-                "OpenRouter returned no visible reply (finish_reason=%s); retrying",
-                result.get("finish_reason"),
-            )
-            body = dict(body)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
-            body["reasoning"] = {"effort": "minimal"}
-            result = await self._post_chat(body, headers)
-
+        result = await self._post_with_recovery(body, headers)
         if result["status"] != 200 or not result["text"]:
-            if result["status"] == 200:
-                logger.warning("OpenRouter reply stayed empty after retry")
             return None
 
         return {
@@ -348,6 +350,69 @@ class LLMHandler:
             "model_used": result.get("model_used") or effective_model,
             "usage": result.get("usage") or {},
         }
+
+    async def _post_with_recovery(self, body: dict, headers: dict) -> dict:
+        """
+        POST, then repair the request for the failures models actually hit:
+        a retired model ID, a refusal to skip reasoning, a reply that ran out
+        of tokens while thinking, and transient rate limits / outages.
+        Each repair runs at most once.
+        """
+        body = dict(body)
+        repaired = set()
+        result = await self._post_chat(body, headers)
+        for _ in range(4):
+            status, error = result["status"], result["error"]
+            model = body["model"]
+            if status == 200 and result["text"]:
+                return result
+
+            if _model_unavailable(status, error) and model != DEFAULT_MODEL and "model" not in repaired:
+                repaired.add("model")
+                logger.warning(
+                    "OpenRouter no longer serves %s; using %s. Pick a current model "
+                    "with /botsettings modelfree or modelpaid.", model, DEFAULT_MODEL,
+                )
+                body["model"] = DEFAULT_MODEL
+                body.pop("allowed_models", None)
+            elif (
+                status == 400
+                and "reasoning" in body
+                and _reasoning_request_rejected(error)
+                and "reasoning" not in repaired
+            ):
+                repaired.add("reasoning")
+                logger.warning("%s rejected the reasoning setting; retrying without it", model)
+                _thinking_models.add(model)
+                body.pop("reasoning", None)
+                body["max_tokens"] = max(int(body.get("max_tokens") or 0), REASONING_MIN_TOKENS)
+            elif status in _TRANSIENT_STATUSES and "transient" not in repaired:
+                repaired.add("transient")
+                logger.warning("OpenRouter %s for %s; retrying once", status, model)
+                await asyncio.sleep(1.5)
+            elif status == 200 and "budget" not in repaired:
+                # Tokens were spent before a sentence existed (reasoning or a
+                # cut-off <think> block). Give the answer room.
+                repaired.add("budget")
+                logger.warning(
+                    "%s returned no visible reply (finish_reason=%s); retrying with a larger budget",
+                    model, result.get("finish_reason"),
+                )
+                _thinking_models.add(model)
+                _give_reasoning_room(body)
+            else:
+                break
+            result = await self._post_chat(body, headers)
+
+        if result["status"] == 200 and not result["text"]:
+            logger.warning("%s reply stayed empty after retry", body["model"])
+        elif _privacy_blocked(result["error"]):
+            logger.error(
+                "OpenRouter blocked %s by account privacy settings. Free models need "
+                "'Enable free endpoints that may train on inputs' at "
+                "https://openrouter.ai/settings/privacy", body["model"],
+            )
+        return result
 
     async def _post_chat(self, body: dict, headers: dict) -> dict:
         """POST one completion. Never raises; status 0 means a transport error."""
@@ -406,7 +471,7 @@ class LLMHandler:
 
     # ── OpenRouter Image Generation (via modalities) ──
 
-    async def generate_image_openrouter(self, prompt: str, model: str = "openai/gpt-4o",
+    async def generate_image_openrouter(self, prompt: str, model: str = DEFAULT_IMAGE_MODEL,
                                         size: str = "1024x1024",
                                         reference_data_url: str = None) -> str:
         """
@@ -462,35 +527,12 @@ class LLMHandler:
                         return ""
 
                     data = await resp.json()
-
-                    # OpenRouter returns images in different formats depending on the model.
-                    # Some return markdown ![image](data:...) in the content.
-                    # Some return separate content blocks.
-                    content = ""
-                    if data.get("choices"):
-                        message = data["choices"][0].get("message", {})
-                        content = message.get("content", "")
-
-                    # Check for inline data:image in content
-                    if "data:image" in content:
-                        import re
-                        match = re.search(r'(data:image/[^;]+;base64,[A-Za-z0-9+/=]+)', content)
-                        if match:
-                            return match.group(1)
-
-                    # Check for image_url in response (some models)
-                    if data.get("choices"):
-                        message = data["choices"][0].get("message", {})
-                        if isinstance(message, dict) and "content" in message:
-                            # Some models return a list of content blocks
-                            c = message["content"]
-                            if isinstance(c, list):
-                                for block in c:
-                                    if isinstance(block, dict) and block.get("type") == "image_url":
-                                        return block.get("image_url", {}).get("url", "")
-
-                    logger.warning(f"OpenRouter image gen returned no image. Content: {content[:200]}")
-                    return ""
+                    image_url = image_from_completion(data)
+                    if not image_url:
+                        logger.warning(
+                            f"OpenRouter image gen ({model}) returned no image: {str(data)[:200]}"
+                        )
+                    return image_url
 
         except aiohttp.ClientError as e:
             logger.error(f"OpenRouter image gen failed: {e}")
@@ -632,6 +674,39 @@ async def generate_llm_response(
     return text or None
 
 
+def image_from_completion(data) -> str:
+    """
+    Pull a generated image URL out of an OpenRouter completion.
+
+    OpenRouter puts images in `message.images`; some providers instead inline a
+    data URL in the text or return image_url content blocks.
+    """
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return ""
+    message = choices[0].get("message") or {}
+    if not isinstance(message, dict):
+        return ""
+
+    blocks = list(message.get("images") or [])
+    content = message.get("content")
+    if isinstance(content, list):
+        blocks.extend(content)
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") == "image_url":
+            url = (block.get("image_url") or {}).get("url")
+            if url:
+                return url
+
+    if isinstance(content, str):
+        match = re.search(r"(data:image/[^;]+;base64,[A-Za-z0-9+/=]+)", content)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def build_pollinations_url(prompt: str) -> str:
     """URL-encode the full subject so Discord does not fetch only the first word."""
     seed = hashlib.md5(prompt.encode()).hexdigest()[:8]
@@ -665,11 +740,12 @@ async def generate_image(prompt: str, model_name: str = "zai-sidecar",
 
     When reference_path is set, prefer OpenRouter so the likeness can be matched.
     """
+    model_name = resolve_image_model(model_name)
     logger.info(f"[IMG] generate_image called: model={model_name}, prompt=\"{prompt[:80]}\"")
     reference_url = reference_image_data_url(reference_path)
 
     if reference_url and _llm_handler.api_key:
-        ref_model = model_name if model_name not in {"zai-sidecar", "pollinations", ""} else "google/gemini-2.5-flash-image"
+        ref_model = model_name if model_name not in {"zai-sidecar", "pollinations", ""} else DEFAULT_IMAGE_MODEL
         logger.info(f"[IMG] Trying OpenRouter likeness gen with model={ref_model}")
         b64_or_url = await _llm_handler.generate_image_openrouter(
             prompt, model=ref_model, reference_data_url=reference_url
@@ -747,7 +823,7 @@ async def parse_settings_command(prompt: str):
         "Return ONLY a JSON object with exactly two fields: \"key\" and \"value\". "
         "No other text, no markdown formatting.\n\n"
         "Valid setting keys and their expected value types:\n"
-        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-4\")\n"
+        "- llm_model: string (model ID, e.g. \"openai/gpt-4o\", \"anthropic/claude-sonnet-5.5\")\n"
         "- response_enabled: boolean\n"
         "- cooldown_seconds: integer\n"
         "- trigger_on_mention: boolean\n"
