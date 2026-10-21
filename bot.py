@@ -151,6 +151,13 @@ async def on_ready():
         logger.error(f"Failed to load cogs.settings_cog: {e}", exc_info=True)
 
     try:
+        await bot.load_extension("cogs.trivia")
+        logger.info("Loaded cog: cogs.trivia (trivia mode)")
+    except Exception as e:
+        cog_load_errors.append(f"cogs.trivia: {e}")
+        logger.error(f"Failed to load cogs.trivia: {e}", exc_info=True)
+
+    try:
         await bot.load_extension("chat")
         logger.info("Loaded cog: chat (personality preset commands)")
     except Exception as e:

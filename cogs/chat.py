@@ -879,6 +879,10 @@ class Chat(commands.Cog):
         if message.guild is None or message.author == self.bot.user:
             return
 
+        trivia_cog = self.bot.get_cog("TriviaCog")
+        if trivia_cog and trivia_cog.is_active(message.channel.id):
+            return
+
         guild_id = message.guild.id
         channel_id = message.channel.id
         settings = await self.settings_manager.get_settings(guild_id)
