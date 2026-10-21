@@ -28,13 +28,81 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SIDECAR_URL = os.environ.get("ZAI_SIDECAR_URL", "http://localhost:3456")
 
-# Default model (used when auto-router is off)
-DEFAULT_MODEL = "meta-llama/llama-4-maverick:free"
+# Default model (used when auto-router is off).
+# The previous default, meta-llama/llama-4-maverick:free, is no longer on
+# OpenRouter, so every fresh server 404'd until someone picked GPT-4o.
+DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 
-# Discord replies are one or two sentences. Reasoning models will spend a
-# small max_tokens budget on hidden thinking and return an empty `content`,
-# which shows up in chat as typing with no message. Ask for no reasoning
-# unless the provider rejects that.
+# Ids OpenRouter still serves. Kept in sync with the dashboard and slash picker.
+FREE_MODELS = [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "thinkingmachines/inkling:free",
+    "poolside/laguna-s-2.1:free",
+    "openrouter/free",
+]
+
+PAID_MODELS = [
+    "openai/gpt-4o",
+    "openai/gpt-4.1",
+    "openai/gpt-4o-mini",
+    "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-opus-4.6",
+    "anthropic/claude-haiku-4.5",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "meta-llama/llama-4-maverick",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-chat-v3-0324",
+    "mistralai/mistral-large-2512",
+    "x-ai/grok-4.20",
+    "openai/o4-mini",
+    "openai/o3-mini",
+    "qwen/qwen3-235b-a22b-2507",
+    "perplexity/sonar-pro",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "microsoft/phi-4",
+    "cohere/command-r-plus-08-2024",
+]
+
+# Guild settings still store ids OpenRouter has retired. Map them onto a
+# live model so an old pick keeps answering instead of 404ing.
+MODEL_ALIASES = {
+    "meta-llama/llama-4-maverick:free": "google/gemma-4-31b-it:free",
+    "google/gemma-3-27b-it:free": "google/gemma-4-31b-it:free",
+    "google/gemma-3-12b-it:free": "google/gemma-4-26b-a4b-it:free",
+    "qwen/qwen3-235b-a22b:free": "qwen/qwen3-235b-a22b-2507",
+    "qwen/qwen3-235b-a22b": "qwen/qwen3-235b-a22b-2507",
+    "qwen/qwen3-32b:free": "qwen/qwen3-32b",
+    "microsoft/phi-4-reasoning-plus:free": "microsoft/phi-4",
+    "deepseek/deepseek-r1:free": "deepseek/deepseek-chat",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free": "nvidia/nemotron-3-super-120b-a12b:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free": "google/gemma-4-26b-a4b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free": "meta-llama/llama-3.3-70b-instruct",
+    "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-opus-4": "anthropic/claude-opus-4.6",
+    "anthropic/claude-haiku-3.5": "anthropic/claude-haiku-4.5",
+    "anthropic/claude-3.5-haiku": "anthropic/claude-haiku-4.5",
+    "mistralai/mistral-large-2411": "mistralai/mistral-large-2512",
+    "x-ai/grok-3": "x-ai/grok-4.20",
+    "x-ai/grok-3-mini": "x-ai/grok-4.3",
+    "perplexity/llama-3.1-sonar-huge-128k-online": "perplexity/sonar-pro",
+    "nvidia/llama-3.1-nemotron-ultra-253b": "nvidia/nemotron-3-ultra-550b-a55b",
+    "meta-llama/llama-3.1-405b-instruct": "meta-llama/llama-3.3-70b-instruct",
+}
+
+
+def resolve_model(model: str) -> str:
+    """Map a saved model id onto one OpenRouter still serves."""
+    cleaned = str(model or "").strip()
+    if not cleaned:
+        return DEFAULT_MODEL
+    if cleaned == "openrouter/auto":
+        return cleaned
+    return MODEL_ALIASES.get(cleaned, cleaned)
 _THINK_BLOCK_RE = re.compile(
     r"<(?:think|thinking|reasoning)\b[^>]*>.*?</(?:think|thinking|reasoning)>",
     re.IGNORECASE | re.DOTALL,
@@ -238,6 +306,7 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
 
     if not model:
         model = DEFAULT_MODEL
+    model = resolve_model(model)
     return {
         "model": model,
         "system_prompt": actual_system_prompt,
@@ -247,9 +316,150 @@ def route_chat_messages(system_prompt, messages, auto_router=False, allowed_mode
     }
 
 
-def _reasoning_request_rejected(error_text: str) -> bool:
+def provider_safe_messages(messages):
+    """
+    Leave one leading system prompt and fold later system notes into the
+    next user turn.
+
+    GPT-4o accepts a system message in the middle of the transcript
+    ("--- A long time passes ---"). Claude, Gemini, and Mistral reject that
+    shape, so those models 400'd while GPT-4o replied.
+    """
+    pending_notes = []
+    out = []
+
+    def _with_notes(msg, notes):
+        note = " ".join(n for n in notes if n)
+        if not note:
+            return msg
+        content = msg.get("content")
+        if isinstance(content, str):
+            return {**msg, "content": f"{note}\n{content}".strip()}
+        if isinstance(content, list):
+            return {**msg, "content": [{"type": "text", "text": note}, *content]}
+        return {**msg, "content": note}
+
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "system":
+            if pending_notes and msg.get("role") == "user":
+                out.append(_with_notes(msg, pending_notes))
+                pending_notes = []
+            else:
+                out.append(msg)
+            continue
+        raw = msg.get("content")
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            continue
+        if not out or out[-1].get("role") == "system":
+            if out and out[-1].get("role") == "system":
+                out[-1] = {
+                    "role": "system",
+                    "content": f"{out[-1].get('content', '').strip()}\n\n{text}".strip(),
+                }
+            else:
+                out.append({"role": "system", "content": text})
+            continue
+        inner = text.strip("-").strip() or text
+        pending_notes.append(f"({inner})")
+
+    if pending_notes:
+        if out and out[-1].get("role") == "user":
+            out[-1] = _with_notes(out[-1], pending_notes)
+        else:
+            out.append({"role": "user", "content": " ".join(pending_notes)})
+    return _collapse_same_role(out)
+
+
+def _merge_content(left, right):
+    if isinstance(left, str) and isinstance(right, str):
+        return f"{left}\n{right}"
+    if isinstance(left, list) and isinstance(right, list):
+        return [*left, *right]
+    if isinstance(left, str) and isinstance(right, list):
+        return [{"type": "text", "text": left}, *right]
+    if isinstance(left, list) and isinstance(right, str):
+        return [*left, {"type": "text", "text": right}]
+    return right
+
+
+def _collapse_same_role(messages):
+    """Claude and Gemini want user/assistant turns to alternate. GPT-4o does not."""
+    collapsed = []
+    for msg in messages:
+        if (
+            collapsed
+            and collapsed[-1].get("role") == msg.get("role")
+            and msg.get("role") in {"user", "assistant"}
+        ):
+            collapsed[-1] = {
+                **collapsed[-1],
+                "content": _merge_content(collapsed[-1].get("content"), msg.get("content")),
+            }
+            continue
+        collapsed.append(msg)
+    return collapsed
+
+
+def fold_system_into_user(messages):
+    """Some hosts reject the system role entirely. Put the prompt on the user turn."""
+    notes = []
+    rest = []
+    for msg in messages or []:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                notes.append(content.strip())
+            continue
+        rest.append(msg)
+    if not notes:
+        return list(messages or [])
+    prefix = "Instructions:\n" + "\n\n".join(notes)
+    if rest and isinstance(rest[0], dict) and rest[0].get("role") == "user":
+        content = rest[0].get("content")
+        if isinstance(content, str):
+            rest[0] = {**rest[0], "content": f"{prefix}\n\n{content}"}
+            return rest
+        if isinstance(content, list):
+            rest[0] = {**rest[0], "content": [{"type": "text", "text": prefix}, *content]}
+            return rest
+    return [{"role": "user", "content": prefix}, *rest]
+
+
+def _error_mentions(error_text: str, *needles) -> bool:
     lowered = (error_text or "").lower()
-    return "reasoning" in lowered
+    return any(needle in lowered for needle in needles)
+
+
+def _rejects_temperature(error_text: str) -> bool:
+    return _error_mentions(error_text, "temperature")
+
+
+def _rejects_max_tokens(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    return "max_tokens" in lowered and "max_completion_tokens" not in lowered and _error_mentions(
+        lowered, "not support", "unsupported", "unrecognized", "unknown"
+    )
+
+
+def _rejects_system_role(error_text: str) -> bool:
+    return _error_mentions(error_text, "system") and _error_mentions(
+        error_text, "role", "message", "not support", "unsupported", "developer"
+    )
+
+
+def _rejects_reasoning_config(error_text: str) -> bool:
+    return _error_mentions(
+        error_text,
+        "reasoning",
+        "effort",
+        "thinking",
+        "no endpoints",
+        "unsupported parameter",
+        "not supported",
+    )
 
 
 class LLMHandler:
@@ -274,6 +484,13 @@ class LLMHandler:
         If auto_router=True, uses 'openrouter/auto' which picks the best model.
         Otherwise uses the specified model or DEFAULT_MODEL.
         Returns dict with 'content' and 'model_used' keys, or None on failure.
+
+        The first request omits `reasoning`. Sending effort=none on every call
+        makes OpenRouter look for a provider that can disable thinking. Models
+        that cannot (or that do not take the field) come back 400/404, while
+        GPT-4o ignores it and answers. Thinking models that still return an
+        empty sentence are retried with thinking off, then with a small effort
+        and a larger token budget.
         """
         if not self.api_key:
             logger.error("No OPENROUTER_API_KEY set")
@@ -285,28 +502,14 @@ class LLMHandler:
         if system_prompt:
             final_messages.append({"role": "system", "content": system_prompt})
         final_messages.extend(flatten_message(msg) for msg in messages)
+        final_messages = provider_safe_messages(final_messages)
 
-        # Determine model
         if auto_router:
             effective_model = "openrouter/auto"
         elif model:
-            effective_model = model
+            effective_model = resolve_model(model)
         else:
-            effective_model = self.default_model
-
-        # Build request body. effort=none keeps the token budget on the
-        # visible sentence instead of an empty content field.
-        body = {
-            "model": effective_model,
-            "messages": final_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "reasoning": {"effort": "none"},
-        }
-
-        # Add allowed_models filter for auto-router
-        if auto_router and allowed_models:
-            body["allowed_models"] = allowed_models
+            effective_model = resolve_model(self.default_model)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -315,39 +518,113 @@ class LLMHandler:
             "X-Title": "Dripsletongue Bot",
         }
 
-        result = await self._post_chat(body, headers)
-        if result["status"] == 400 and _reasoning_request_rejected(result["error"]):
-            logger.warning("Provider rejected reasoning=none; retrying without it")
-            body = dict(body)
-            body.pop("reasoning", None)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0), 800)
-            result = await self._post_chat(body, headers)
-        elif result["status"] in {429, 500, 502, 503, 504}:
-            logger.warning(f"OpenRouter {result['status']}; retrying once")
-            await asyncio.sleep(1.0)
-            result = await self._post_chat(body, headers)
-        elif result["status"] == 200 and not result["text"]:
-            # Tokens were spent before a sentence existed (usually reasoning
-            # or a cut-off <think> block). Give the answer a larger budget.
-            logger.warning(
-                "OpenRouter returned no visible reply (finish_reason=%s); retrying",
-                result.get("finish_reason"),
+        include_temperature = True
+        use_completion_tokens = False
+        folded_system = False
+        reasoning = None
+        tokens = max(int(max_tokens or 0), 1)
+        allowed = [resolve_model(item) for item in allowed_models] if allowed_models else None
+        tried = set()
+        result = {"status": 0, "error": "", "text": "", "model_used": effective_model, "usage": {}}
+
+        for _attempt in range(5):
+            body = {
+                "model": effective_model,
+                "messages": final_messages,
+            }
+            if use_completion_tokens:
+                body["max_completion_tokens"] = tokens
+            else:
+                body["max_tokens"] = tokens
+            if include_temperature:
+                body["temperature"] = temperature
+            if reasoning:
+                body["reasoning"] = reasoning
+            if auto_router and allowed:
+                body["allowed_models"] = allowed
+
+            signature = json.dumps(
+                {
+                    "model": body.get("model"),
+                    "max_tokens": body.get("max_tokens"),
+                    "max_completion_tokens": body.get("max_completion_tokens"),
+                    "temperature": body.get("temperature"),
+                    "reasoning": body.get("reasoning"),
+                    "messages": body.get("messages"),
+                    "allowed_models": body.get("allowed_models"),
+                },
+                sort_keys=True,
+                default=str,
             )
-            body = dict(body)
-            body["max_tokens"] = max(int(body.get("max_tokens") or 0) * 3, 800)
-            body["reasoning"] = {"effort": "minimal"}
+            if signature in tried:
+                break
+            tried.add(signature)
+
             result = await self._post_chat(body, headers)
+            if result["status"] in {429, 500, 502, 503, 504}:
+                logger.warning(f"OpenRouter {result['status']}; retrying once")
+                await asyncio.sleep(1.0)
+                result = await self._post_chat(body, headers)
 
-        if result["status"] != 200 or not result["text"]:
-            if result["status"] == 200:
-                logger.warning("OpenRouter reply stayed empty after retry")
-            return None
+            if result["status"] == 200 and result["text"]:
+                return {
+                    "content": result["text"],
+                    "model_used": result.get("model_used") or effective_model,
+                    "usage": result.get("usage") or {},
+                }
 
-        return {
-            "content": result["text"],
-            "model_used": result.get("model_used") or effective_model,
-            "usage": result.get("usage") or {},
-        }
+            error = result.get("error") or ""
+            if result["status"] == 200 and not result["text"]:
+                logger.warning(
+                    "OpenRouter returned no visible reply (finish_reason=%s); retrying",
+                    result.get("finish_reason"),
+                )
+                if reasoning is None:
+                    reasoning = {"enabled": False}
+                    tokens = max(tokens * 3, 800)
+                    continue
+                if reasoning.get("enabled") is False or reasoning.get("effort") == "none":
+                    reasoning = {"effort": "low"}
+                    tokens = max(tokens, 800)
+                    continue
+                break
+
+            if result["status"] not in {400, 404, 422}:
+                break
+
+            if _rejects_temperature(error) and include_temperature:
+                logger.warning("Provider rejected temperature; retrying without it")
+                include_temperature = False
+                continue
+            if _rejects_max_tokens(error) and not use_completion_tokens:
+                logger.warning("Provider rejected max_tokens; retrying with max_completion_tokens")
+                use_completion_tokens = True
+                continue
+            if _rejects_system_role(error) and not folded_system:
+                logger.warning("Provider rejected the system role; folding it into the user turn")
+                final_messages = fold_system_into_user(final_messages)
+                folded_system = True
+                continue
+            if reasoning and _rejects_reasoning_config(error):
+                # Mandatory-thinking models reject an explicit "off". Give them
+                # a small effort and enough tokens for the sentence. Any other
+                # rejection means this model does not take the field at all.
+                requires_reasoning = _error_mentions(
+                    error, "mandatory", "cannot be disabled", "cannot be turned off"
+                )
+                if requires_reasoning and reasoning.get("effort") != "low":
+                    logger.warning("Provider requires reasoning; retrying at low effort")
+                    reasoning = {"effort": "low"}
+                    tokens = max(tokens, 800)
+                    continue
+                logger.warning("Provider rejected the reasoning config; dropping it")
+                reasoning = None
+                continue
+            break
+
+        if result.get("status") == 200:
+            logger.warning("OpenRouter reply stayed empty after retry")
+        return None
 
     async def _post_chat(self, body: dict, headers: dict) -> dict:
         """POST one completion. Never raises; status 0 means a transport error."""

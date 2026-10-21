@@ -213,8 +213,17 @@ async def ping(ctx):
 async def show_model(ctx):
     guild_id = ctx.guild.id if ctx.guild else 0
     settings = await settings_manager.get_settings(guild_id)
-    model = settings.get("llm_model") or settings.get("model", "meta-llama/llama-4-maverick:free")
-    await ctx.send(f"Current model: `{model}`")
+    from llm import DEFAULT_MODEL, resolve_model
+
+    stored = settings.get("llm_model") or settings.get("model") or DEFAULT_MODEL
+    live = resolve_model(stored)
+    if live != stored:
+        await ctx.send(
+            f"Current model: `{stored}` → `{live}` "
+            "(that saved id is no longer on OpenRouter)"
+        )
+        return
+    await ctx.send(f"Current model: `{live}`")
 
 
 @bot.command(name="imagine", aliases=["image", "img", "draw"])

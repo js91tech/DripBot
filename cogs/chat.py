@@ -25,7 +25,13 @@ from utils import (
     strip_leading_address,
     world_context_line,
 )
-from llm import generate_llm_response, generate_image, analyze_image_vision, web_search_zai
+from llm import (
+    DEFAULT_MODEL,
+    analyze_image_vision,
+    generate_image,
+    generate_llm_response,
+    web_search_zai,
+)
 from people import (
     build_image_prompt,
     is_nsfw_request,
@@ -588,7 +594,7 @@ class Chat(commands.Cog):
             system_msg = {
                 "role": "system",
                 "content": prompt,
-                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free"),
+                "model": settings.get("llm_model", DEFAULT_MODEL),
                 "auto_router": settings.get("auto_router_enabled", False),
                 "allowed_models": settings.get("auto_router_allowed_models") or None,
             }
@@ -650,7 +656,7 @@ class Chat(commands.Cog):
             chat_history.insert(0, {
                 "role": "system",
                 "content": prompt,
-                "model": settings.get("llm_model", "meta-llama/llama-4-maverick:free"),
+                "model": settings.get("llm_model", DEFAULT_MODEL),
             })
             summary = await generate_llm_response(prompt, chat_history, max_tokens=160, temperature=0.3)
             if summary:
@@ -1098,7 +1104,7 @@ class Chat(commands.Cog):
                 chat_history.insert(0, {
                     "role": "system",
                     "content": dynamic_prompt,
-                    "model": settings.get("llm_model") or settings.get("model") or "meta-llama/llama-4-maverick:free",
+                    "model": settings.get("llm_model") or settings.get("model") or DEFAULT_MODEL,
                     "auto_router": settings.get("auto_router_enabled", False),
                     "allowed_models": settings.get("auto_router_allowed_models") or None,
                 })

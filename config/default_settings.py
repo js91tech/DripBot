@@ -524,8 +524,8 @@ DEFAULT_SETTINGS = {
     "gif_chance": 0.10,
 
     # ── LLM Model ──
-    "llm_model": "meta-llama/llama-4-maverick:free",
-    "model": "meta-llama/llama-4-maverick:free",  # Dashboard API compat (synced with llm_model)
+    "llm_model": "google/gemma-4-31b-it:free",
+    "model": "google/gemma-4-31b-it:free",  # Dashboard API compat (synced with llm_model)
 
     # ── Image Generation ──
     "image_model": "zai-sidecar",
