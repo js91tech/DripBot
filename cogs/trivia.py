@@ -17,8 +17,7 @@ from trivia import (
     BUSY,
     DENIED,
     EXAMPLE_QUESTIONS,
-    HELP_TEXT,
-    PUBLIC_HELP_TEXT,
+    help_text,
     MAX_ROUND,
     NONE_RUNNING,
     NOT_READY,
@@ -339,15 +338,34 @@ class Trivia(commands.Cog):
 
     # ── Prefix commands ──────────────────────────────────────────
 
+    @commands.command(name="help")
+    async def help_command(self, ctx):
+        """Show how to play trivia and, for admins, how to add questions."""
+        await self._deliver_help(ctx)
+
     @commands.group(name="trivia", invoke_without_command=True)
     async def trivia(self, ctx):
         """Show trivia help."""
-        await ctx.send(HELP_TEXT)
+        await self._deliver_help(ctx)
 
     @trivia.command(name="help")
     async def trivia_help(self, ctx):
         """Show trivia help."""
-        await ctx.send(HELP_TEXT)
+        await self._deliver_help(ctx)
+
+    async def _deliver_help(self, ctx):
+        """Players see how to play. Admins are DM'd the add-question guide."""
+        is_admin = ctx.guild is None or self._is_admin(ctx.author)
+        text = help_text(is_admin)
+        if ctx.guild is not None and is_admin:
+            try:
+                await ctx.author.send(text)
+            except discord.HTTPException:
+                await ctx.send(text)
+                return
+            await ctx.send("Sent you the trivia guide, including how to add questions.")
+            return
+        await ctx.send(text)
 
     @trivia.command(name="start", aliases=["play"])
     @commands.guild_only()
@@ -525,9 +543,23 @@ class Trivia(commands.Cog):
             return
         await interaction.response.send_message(await self._summary(guild.id))
 
-    @slash.command(name="help", description="How to play trivia and add questions")
+    @slash.command(name="help", description="How to play trivia and how admins add questions")
     async def slash_help(self, interaction: discord.Interaction):
-        await self._reply(interaction, PUBLIC_HELP_TEXT, ephemeral=True)
+        await self._reply(
+            interaction,
+            help_text(self._is_admin(interaction.user)),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="help", description="How to play trivia and how admins add questions")
+    @app_commands.guild_only()
+    async def slash_bot_help(self, interaction: discord.Interaction):
+        """Ephemeral guide. Admins also see how to add questions."""
+        await self._reply(
+            interaction,
+            help_text(self._is_admin(interaction.user)),
+            ephemeral=True,
+        )
 
     @slash.command(name="add", description="Add a trivia question to this server")
     @app_commands.default_permissions(manage_guild=True)
@@ -535,9 +567,9 @@ class Trivia(commands.Cog):
     @app_commands.describe(
         question_type="Multiple choice, true or false, or open ended",
         question="The question players will see",
-        answer="Correct answer. For multiple choice, a letter or the exact choice.",
-        choices="Multiple choice only. Separate choices with |",
-        also_accept="Open ended only. Other accepted answers, separated by |",
+        answer="A letter, true or false, or the exact answer",
+        choices="Multiple choice only. Example: Paris | London | Berlin",
+        also_accept="Open ended only. Extra answers separated by |",
     )
     @app_commands.choices(
         question_type=[

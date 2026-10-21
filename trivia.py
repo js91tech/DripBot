@@ -108,63 +108,62 @@ _EMOJI = re.compile(r"^<a?:[A-Za-z0-9_]+:\d+>$")
 _LETTER_WORD = re.compile(r"(?:answer|option|choice)\s+([A-Fa-f])[).:]?", re.IGNORECASE)
 
 
-HELP_TEXT = """**Trivia mode**
-Anyone can play. Server admins (Manage Server) edit the question bank.
+PLAYER_HELP_TEXT = """**Trivia**
+Anyone in the channel can play. Server admins add the questions.
 
-**Play**
-`!trivia start` — up to 10 questions
-`!trivia start 15` — play 15, or `!trivia start all`
-`!trivia score` — scores for this round
-`!trivia skip` — skip (host or admin)
-`!trivia stop` — end the round (host or admin)
-`!trivia count` — how many questions are saved
-
-Type your answer in chat. The first correct answer scores.
-Multiple choice and true/false are worth 1 point. Open ended is worth 2.
-
-**Admins — add questions**
-Multiple choice (2–6 choices). The last part is the correct letter or choice:
-`!trivia add mc What is the capital of France? | Paris | London | Berlin | Madrid | a`
-
-True or false:
-`!trivia add tf Octopuses have three hearts | true`
-
-Open ended. Extra accepted answers are optional:
-`!trivia add open Who wrote Romeo and Juliet? | Shakespeare | William Shakespeare`
-
-**Admins — bank**
-`!trivia list` — DM the questions and answers
-`!trivia remove 12` — delete question 12
-`!trivia loadexamples` — add 5 multiple choice, 5 true/false, and 5 open ended
-`!trivia clear confirm` — delete every question in this server
-
-The same actions are available as `/trivia`.
-"""
-
-PUBLIC_HELP_TEXT = """**Trivia mode**
-Anyone can play. Server admins (Manage Server) edit the question bank.
-
-**Play**
-`/trivia start` — up to 10 questions
+`/trivia start` — up to 10 questions. A number plays that many, up to 50.
 `/trivia score` — scores for this round
-`/trivia skip` — skip (host or admin)
+`/trivia skip` — skip the current question (host or admin)
 `/trivia stop` — end the round (host or admin)
 `/trivia count` — how many questions are saved
 
 Type your answer in chat. The first correct answer scores.
 Multiple choice and true/false are worth 1 point. Open ended is worth 2.
 
-**Admins — add questions**
-`/trivia add` — multiple choice, true/false, or open ended.
-For multiple choice, separate choices with `|`.
-The answer is a letter or the exact choice.
-
-**Admins — bank**
-`/trivia list` — view questions and answers (only you can see it)
-`/trivia remove` — delete one question by id
-`/trivia loadexamples` — add 5 multiple choice, 5 true/false, and 5 open ended
-`/trivia clear` — delete every question in this server
+Admins: `/trivia help` shows how to add questions.
 """
+
+ADMIN_HELP_TEXT = """**Admins — add questions**
+You need Manage Server. Questions are saved for this server.
+
+**With `/trivia add`**
+Multiple choice. Separate choices with `|`. The answer is a letter or the exact choice.
+Question: What is the capital of France?
+Choices: Paris | London | Berlin | Madrid
+Answer: a
+
+True or false. The answer is true or false.
+Question: Octopuses have three hearts
+Answer: true
+
+Open ended. Extra accepted answers are optional, separated by `|`.
+Question: Who wrote Romeo and Juliet?
+Answer: Shakespeare
+Also accept: William Shakespeare
+
+**With `!trivia add`**
+The last part is the answer.
+`!trivia add mc What is the capital of France? | Paris | London | Berlin | Madrid | a`
+`!trivia add tf Octopuses have three hearts | true`
+`!trivia add open Who wrote Romeo and Juliet? | Shakespeare | William Shakespeare`
+
+**Admins — the question bank**
+`/trivia list` or `!trivia list` — questions and answers, shown only to you
+`/trivia remove` or `!trivia remove 12` — delete question 12
+`/trivia loadexamples` or `!trivia loadexamples` — 5 multiple choice, 5 true/false, and 5 open ended
+`/trivia clear` or `!trivia clear confirm` — delete every question in this server
+"""
+
+
+def help_text(is_admin):
+    """Player help for everyone. Admins also get the add-question guide."""
+    if is_admin:
+        return f"{PLAYER_HELP_TEXT}\n{ADMIN_HELP_TEXT}"
+    return PLAYER_HELP_TEXT
+
+
+HELP_TEXT = help_text(True)
+PUBLIC_HELP_TEXT = PLAYER_HELP_TEXT
 
 
 def clean_text(text):
@@ -652,8 +651,8 @@ def format_bank(questions):
 def empty_bank_message():
     return (
         "This server doesn't have trivia questions yet.\n"
-        "An admin can add some with `/trivia add`, "
-        "or load a sample pack of 5 multiple choice, 5 true/false, and 5 open ended "
+        "An admin can add some with `/trivia add`. `/trivia help` shows how.\n"
+        "Or load a sample pack of 5 multiple choice, 5 true/false, and 5 open ended "
         "with `/trivia loadexamples`."
     )
 
