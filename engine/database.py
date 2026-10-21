@@ -52,6 +52,21 @@ class Database:
                                     message TEXT,
                                     trigger_time REAL)"""
         )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_questions (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    guild_id INTEGER NOT NULL,
+                                    question_type TEXT NOT NULL,
+                                    question TEXT NOT NULL,
+                                    answer TEXT NOT NULL,
+                                    options_json TEXT,
+                                    created_by INTEGER NOT NULL,
+                                    created_at REAL DEFAULT (unixepoch()))"""
+        )
+        await self.conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_trivia_guild_type
+                                    ON trivia_questions (guild_id, question_type)"""
+        )
         await self.conn.commit()
         self._worker_task = asyncio.create_task(self._write_worker())
 
@@ -205,6 +220,63 @@ class Database:
 
     async def delete_reminder(self, reminder_id):
         await self.queue.put(("DELETE FROM reminders WHERE id = ?", (reminder_id,)))
+
+    async def add_trivia_question(
+        self, guild_id, question_type, question, answer, options, created_by
+    ):
+        cursor = await self.conn.execute(
+            """INSERT INTO trivia_questions
+               (guild_id, question_type, question, answer, options_json, created_by)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                guild_id,
+                question_type,
+                question,
+                answer,
+                json.dumps(options) if options else None,
+                created_by,
+            ),
+        )
+        await self.conn.commit()
+        return cursor.lastrowid
+
+    async def get_trivia_questions(self, guild_id, question_type=None):
+        if question_type:
+            cursor = await self.conn.execute(
+                """SELECT id, question_type, question, answer, options_json, created_by
+                   FROM trivia_questions
+                   WHERE guild_id = ? AND question_type = ?
+                   ORDER BY id""",
+                (guild_id, question_type),
+            )
+        else:
+            cursor = await self.conn.execute(
+                """SELECT id, question_type, question, answer, options_json, created_by
+                   FROM trivia_questions
+                   WHERE guild_id = ?
+                   ORDER BY id""",
+                (guild_id,),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row[0],
+                "type": row[1],
+                "question": row[2],
+                "answer": row[3],
+                "options": json.loads(row[4]) if row[4] else [],
+                "created_by": row[5],
+            }
+            for row in rows
+        ]
+
+    async def delete_trivia_question(self, guild_id, question_id):
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ? AND id = ?",
+            (guild_id, question_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
 
     async def close(self):
         if self._worker_task:
