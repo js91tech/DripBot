@@ -52,6 +52,27 @@ class Database:
                                     message TEXT,
                                     trigger_time REAL)"""
         )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_questions (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    guild_id INTEGER,
+                                    qtype TEXT,
+                                    question TEXT,
+                                    options_json TEXT,
+                                    answer TEXT,
+                                    answer_index INTEGER,
+                                    alternates_json TEXT,
+                                    created_by INTEGER,
+                                    created_at REAL)"""
+        )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS trivia_scores (
+                                    guild_id INTEGER,
+                                    user_id INTEGER,
+                                    points INTEGER DEFAULT 0,
+                                    wins INTEGER DEFAULT 0,
+                                    PRIMARY KEY (guild_id, user_id))"""
+        )
         await self.conn.commit()
         self._worker_task = asyncio.create_task(self._write_worker())
 
@@ -205,6 +226,145 @@ class Database:
 
     async def delete_reminder(self, reminder_id):
         await self.queue.put(("DELETE FROM reminders WHERE id = ?", (reminder_id,)))
+
+    # ── Trivia ──
+
+    async def add_trivia_question(self, guild_id, qtype, question, options,
+                                  answer, answer_index=None, alternates=None,
+                                  created_by=0):
+        import time as _time
+
+        cursor = await self.conn.execute(
+            """INSERT INTO trivia_questions
+               (guild_id, qtype, question, options_json, answer, answer_index,
+                alternates_json, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                guild_id,
+                qtype,
+                question,
+                json.dumps(options or []),
+                str(answer),
+                answer_index,
+                json.dumps(alternates or []),
+                created_by,
+                _time.time(),
+            ),
+        )
+        await self.conn.commit()
+        return cursor.lastrowid
+
+    def _trivia_row_to_dict(self, row):
+        qid, guild_id, qtype, question, options_json, answer, answer_index, alternates_json, created_by = row
+        try:
+            options = json.loads(options_json or "[]")
+        except (TypeError, ValueError):
+            options = []
+        try:
+            alternates = json.loads(alternates_json or "[]")
+        except (TypeError, ValueError):
+            alternates = []
+        parsed_answer = answer
+        if qtype == "true_false":
+            parsed_answer = str(answer).strip().lower() in ("1", "true", "t", "yes", "y")
+        return {
+            "id": qid,
+            "guild_id": guild_id,
+            "qtype": qtype,
+            "question": question,
+            "options": options,
+            "answer": parsed_answer if qtype == "true_false" else answer,
+            "answer_index": answer_index,
+            "alternates": alternates,
+            "created_by": created_by,
+        }
+
+    async def get_trivia_questions(self, guild_id, qtype=None):
+        if qtype:
+            cursor = await self.conn.execute(
+                "SELECT id, guild_id, qtype, question, options_json, answer,"
+                " answer_index, alternates_json, created_by"
+                " FROM trivia_questions WHERE guild_id = ? AND qtype = ? ORDER BY id",
+                (guild_id, qtype),
+            )
+        else:
+            cursor = await self.conn.execute(
+                "SELECT id, guild_id, qtype, question, options_json, answer,"
+                " answer_index, alternates_json, created_by"
+                " FROM trivia_questions WHERE guild_id = ? ORDER BY id",
+                (guild_id,),
+            )
+        rows = await cursor.fetchall()
+        return [self._trivia_row_to_dict(row) for row in rows]
+
+    async def count_trivia_questions(self, guild_id):
+        cursor = await self.conn.execute(
+            "SELECT qtype, COUNT(*) FROM trivia_questions WHERE guild_id = ? GROUP BY qtype",
+            (guild_id,),
+        )
+        rows = await cursor.fetchall()
+        counts = {"multiple_choice": 0, "true_false": 0, "open": 0, "total": 0}
+        for qtype, count in rows:
+            counts[qtype] = count
+            counts["total"] += count
+        return counts
+
+    async def delete_trivia_question(self, guild_id, question_id):
+        cursor = await self.conn.execute(
+            "DELETE FROM trivia_questions WHERE guild_id = ? AND id = ?",
+            (guild_id, question_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def clear_trivia_questions(self, guild_id, qtype=None):
+        if qtype:
+            cursor = await self.conn.execute(
+                "DELETE FROM trivia_questions WHERE guild_id = ? AND qtype = ?",
+                (guild_id, qtype),
+            )
+        else:
+            cursor = await self.conn.execute(
+                "DELETE FROM trivia_questions WHERE guild_id = ?",
+                (guild_id,),
+            )
+        await self.conn.commit()
+        return cursor.rowcount
+
+    async def add_trivia_points(self, guild_id, user_id, points=1):
+        sql = (
+            "INSERT INTO trivia_scores (guild_id, user_id, points, wins) VALUES (?, ?, ?, 0) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET points = points + ?"
+        )
+        await self.conn.execute(sql, (guild_id, user_id, points, points))
+        await self.conn.commit()
+
+    async def add_trivia_win(self, guild_id, user_id):
+        sql = (
+            "INSERT INTO trivia_scores (guild_id, user_id, points, wins) VALUES (?, ?, 0, 1) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET wins = wins + 1"
+        )
+        await self.conn.execute(sql, (guild_id, user_id))
+        await self.conn.commit()
+
+    async def get_trivia_leaderboard(self, guild_id, limit=10):
+        cursor = await self.conn.execute(
+            "SELECT user_id, points, wins FROM trivia_scores"
+            " WHERE guild_id = ? ORDER BY points DESC, wins DESC LIMIT ?",
+            (guild_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [{"user_id": row[0], "points": row[1], "wins": row[2]} for row in rows]
+
+    async def get_trivia_score(self, guild_id, user_id):
+        cursor = await self.conn.execute(
+            "SELECT points, wins FROM trivia_scores WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        row = await cursor.fetchone()
+        if row:
+            return {"points": row[0], "wins": row[1]}
+        return {"points": 0, "wins": 0}
 
     async def close(self):
         if self._worker_task:

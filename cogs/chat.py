@@ -898,6 +898,19 @@ class Chat(commands.Cog):
         if not settings.get("response_enabled", True):
             return
 
+        # Trivia mode: stay quiet while a game runs in this channel so
+        # single-letter answers ("B", "true", ...) are not interrupted.
+        # Explicit mentions of the bot still get a reply below.
+        active_trivia = getattr(self.bot, "trivia_active_channels", None)
+        if active_trivia and channel_id in active_trivia:
+            mentioned = False
+            try:
+                mentioned = self.bot.user in (message.mentions or [])
+            except Exception:
+                mentioned = False
+            if not mentioned:
+                return
+
         # Image generation: keep mention gate for paid models.
         # Extract the visual subject only so "hannah draw a cat" does not
         # become a portrait of Hannah. "draw panda" / "draw hannah" use the
