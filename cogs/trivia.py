@@ -47,6 +47,8 @@ def prepare_question(question_type, question, answer, options_text=""):
         options = [item.strip() for item in (options_text or "").split(",") if item.strip()]
         if not 2 <= len(options) <= 5:
             raise ValueError("Multiple-choice questions need 2 to 5 comma-separated options.")
+        if any(len(item) > 75 or not normalize_answer(item) for item in options):
+            raise ValueError("Each option must contain 1 to 75 letters or numbers.")
         if len({normalize_answer(item) for item in options}) != len(options):
             raise ValueError("Multiple-choice options must be unique.")
         matching = [item for item in options if normalize_answer(item) == normalize_answer(answer)]
@@ -59,7 +61,11 @@ def prepare_question(question_type, question, answer, options_text=""):
             raise ValueError("A true/false answer must be `true` or `false`.")
         answer = normalized.title()
     else:
-        accepted = [item.strip() for item in answer.split("|") if item.strip()]
+        accepted = [
+            item.strip()
+            for item in answer.split("|")
+            if item.strip() and normalize_answer(item)
+        ]
         if not accepted:
             raise ValueError("Provide at least one accepted answer.")
         answer = "|".join(accepted)
@@ -158,10 +164,15 @@ class TriviaGame:
         self.view = None
         self.timer_task = None
         self.closed = False
+        self.accepting_answers = False
         self.lock = asyncio.Lock()
 
     def has_answered(self, user_id, question_index):
-        return self.index != question_index or user_id in self.answers
+        return (
+            not self.accepting_answers
+            or self.index != question_index
+            or user_id in self.answers
+        )
 
     async def start(self):
         await self.channel.send(
@@ -181,6 +192,7 @@ class TriviaGame:
             else:
                 finish = False
                 self.answers = {}
+                self.accepting_answers = True
                 question = self.questions[self.index]
                 self.view = TriviaQuestionView(self, self.index, question)
                 embed = self._question_embed(question)
@@ -210,7 +222,7 @@ class TriviaGame:
 
     async def submit_answer(self, interaction, question_index, value):
         async with self.lock:
-            if self.closed or self.index != question_index:
+            if self.closed or not self.accepting_answers or self.index != question_index:
                 message = "That question is already closed."
             elif interaction.user.id in self.answers:
                 message = "You already answered this question."
@@ -231,6 +243,7 @@ class TriviaGame:
         async with self.lock:
             if self.closed or self.index != question_index:
                 return
+            self.accepting_answers = False
             question = self.questions[self.index]
             answer_count = len(self.answers)
             for child in self.view.children:
@@ -246,7 +259,8 @@ class TriviaGame:
         display_answer = str(question["answer"]).replace("|", " / ")
         await self.channel.send(
             f"⏰ **Time!** The answer was **{discord.utils.escape_markdown(display_answer)}**. "
-            f"{answer_count} player(s) answered."
+            f"{answer_count} player(s) answered.",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
         await asyncio.sleep(3)
         await self.next_question()
@@ -272,6 +286,7 @@ class TriviaGame:
             if self.closed:
                 return
             self.closed = True
+            self.accepting_answers = False
             if self.timer_task:
                 self.timer_task.cancel()
             if self.view:

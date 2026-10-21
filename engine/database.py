@@ -141,6 +141,7 @@ class Database:
         await self.queue.put(
             ("DELETE FROM consolidated_memories WHERE guild_id = ?", (guild_id,))
         )
+        await self.queue.put(("DELETE FROM trivia_questions WHERE guild_id = ?", (guild_id,)))
 
     async def add_memory(self, guild_id, user_id, note, limit: int = 12):
         """Store a short per-user memory, skipping near-duplicates and capping count."""
