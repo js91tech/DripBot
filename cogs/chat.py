@@ -898,6 +898,13 @@ class Chat(commands.Cog):
         if not settings.get("response_enabled", True):
             return
 
+        # If an active trivia game is running in this channel, don't interfere with trivia gameplay
+        trivia_mgr = getattr(self.bot, "trivia_manager", None)
+        if trivia_mgr and trivia_mgr.is_channel_in_trivia(channel_id):
+            direct, _, _ = self._is_direct_address(message, settings)
+            if not direct:
+                return
+
         # Image generation: keep mention gate for paid models.
         # Extract the visual subject only so "hannah draw a cat" does not
         # become a portrait of Hannah. "draw panda" / "draw hannah" use the
