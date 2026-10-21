@@ -1,4 +1,3 @@
-import os
 import aiohttp
 import html
 import re
@@ -100,52 +99,6 @@ async def world_context_line():
         f"Today is {date_label} (UTC). "
         "Use only if someone asks about the date or current events."
     )
-
-
-def prefix_owner_ids(bot=None):
-    """User ids allowed to run ! commands: env owner, app owner, and team members."""
-    ids = []
-    raw = (os.environ.get("OWNER_USER_ID", "") or "").strip()
-    if raw.isdigit():
-        ids.append(int(raw))
-    if bot is None:
-        return ids
-    owner_id = getattr(bot, "owner_id", None)
-    if isinstance(owner_id, int) and owner_id:
-        ids.append(owner_id)
-    for extra in getattr(bot, "owner_ids", None) or []:
-        if isinstance(extra, int) and extra:
-            ids.append(extra)
-    app = getattr(bot, "application", None)
-    if app is None:
-        return ids
-    app_owner_id = getattr(getattr(app, "owner", None), "id", None)
-    if isinstance(app_owner_id, int) and app_owner_id:
-        ids.append(app_owner_id)
-    team = getattr(app, "team", None)
-    for member in getattr(team, "members", None) or []:
-        member_id = getattr(member, "id", None)
-        if isinstance(member_id, int) and member_id:
-            ids.append(member_id)
-    return ids
-
-
-def prefix_command_allowed(author_id, owner_ids):
-    """Prefix commands are for the bot owner only, not server admins."""
-    try:
-        author = int(author_id)
-    except (TypeError, ValueError):
-        return False
-    if not author:
-        return False
-    for owner_id in owner_ids or []:
-        try:
-            owner = int(owner_id)
-        except (TypeError, ValueError):
-            continue
-        if owner and author == owner:
-            return True
-    return False
 
 
 def tenor_search_slug(query):

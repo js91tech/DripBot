@@ -13,7 +13,6 @@ import time
 
 import discord
 from discord.ext import commands
-from utils import prefix_command_allowed, prefix_owner_ids
 
 # ── Logging ──
 logging.basicConfig(
@@ -38,23 +37,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.presences = True
-
-class PrivatePrefixContext(commands.Context):
-    """Prefix command replies go to the owner's DMs, not the channel."""
-
-    async def send(self, content=None, **kwargs):
-        if self.guild is None:
-            return await super().send(content, **kwargs)
-        kwargs.pop("reference", None)
-        kwargs.pop("mention_author", None)
-        kwargs.pop("nonce", None)
-        kwargs.pop("ephemeral", None)
-        try:
-            return await self.author.send(content, **kwargs)
-        except discord.HTTPException:
-            logger.warning("Couldn't DM a prefix command reply")
-            return None
-
 
 # ── Bot Instance ──
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None)
@@ -200,24 +182,21 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     """
-    Prefix commands are private.
-    In a server channel the command message is deleted, and only the bot
-    owner gets a DM reply. Server admins get no reply.
+    Prefix commands still run for the same people as before.
+    In a server channel the typed command is deleted so nobody else,
+    including other admins, can read it. The bot's reply stays in the channel.
     Chat, triggers, and puppet mode stay in cogs/chat.py.
     """
     if message.author.bot:
         return
-    ctx = await bot.get_context(message, cls=PrivatePrefixContext)
-    if ctx.command is None:
-        return
     if message.guild is not None:
-        try:
-            await message.delete()
-        except discord.HTTPException:
-            pass
-    if not prefix_command_allowed(message.author.id, prefix_owner_ids(bot)):
-        return
-    await bot.invoke(ctx)
+        ctx = await bot.get_context(message)
+        if ctx.command is not None:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+    await bot.process_commands(message)
 
 
 # ═══════════════════════════════════════════════════════════════
